@@ -25,10 +25,22 @@ CreateFileW_t pOriginalCreateFileW = NULL;
 WriteFile_t pOriginalWriteFile = NULL;
 HANDLE hSerialPort = INVALID_HANDLE_VALUE;
 
+// دالة ذكية لتحديد مسار مجلد البرنامج الحالي بدقة وكتابة اللوج داخله
 void LogSerialData(const char* label, const BYTE* buffer, DWORD bufferSize) {
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    
+    // مسح اسم ملف الـ EXE والحصول على مسار المجلد فقط
+    wchar_t* lastSlash = wcsrchr(exePath, L'\\');
+    if (lastSlash) {
+        *(lastSlash + 1) = L'\0';
+    }
+    
+    // دمج مسار المجلد مع اسم ملف اللوج
+    wcscat_s(exePath, MAX_PATH, L"serial_log.txt");
+
     FILE* logFile;
-    // حفظ اللوج في نفس مجلد التشغيل تلقائياً لتفادي مشاكل الصلاحيات
-    fopen_s(&logFile, "serial_log.txt", "a+");
+    _wfopen_s(&logFile, exePath, L"a+");
     if (logFile) {
         fprintf(logFile, "[%s]: ", label);
         for (DWORD i = 0; i < bufferSize; i++) {
@@ -44,8 +56,10 @@ void LogSerialData(const char* label, const BYTE* buffer, DWORD bufferSize) {
 }
 
 HANDLE WINAPI HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
+    // التحقق إذا كان البرنامج يحاول فتح منفذ COM
     if (lpFileName && wcsstr(lpFileName, L"COM")) {
         hSerialPort = pOriginalCreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+        
         char logMsg[128];
         sprintf_s(logMsg, "Opened Serial Port: %ws", lpFileName);
         LogSerialData("INFO", (BYTE*)logMsg, (DWORD)strlen(logMsg));
@@ -55,13 +69,13 @@ HANDLE WINAPI HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD
 }
 
 BOOL WINAPI HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped) {
+    // رصد الكتابة داخل المنفذ الذي تم التقاطه
     if (hFile == hSerialPort && hSerialPort != INVALID_HANDLE_VALUE) {
         LogSerialData("COMMAND SENT", (BYTE*)lpBuffer, nNumberOfBytesToWrite);
     }
     return pOriginalWriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
 }
 
-// دالة الاعتراض عبر الـ IAT دون تعديل بايتات الذاكرة الأصلية
 void IATHook(const char* dllName, const char* funcName, LPVOID hookedFunc, LPVOID* origFunc) {
     HMODULE hMods = GetModuleHandleW(NULL);
     PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)hMods;
@@ -100,11 +114,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
         
-        // جلب العناوين الافتراضية كاحتياط
         pOriginalCreateFileW = (CreateFileW_t)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "CreateFileW");
         pOriginalWriteFile = (WriteFile_t)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "WriteFile");
 
-        // تطبيق الاعتراض الآمن
         IATHook("kernel32.dll", "CreateFileW", (LPVOID)HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW);
         IATHook("kernel32.dll", "WriteFile", (LPVOID)HookedWriteFile, (LPVOID*)&pOriginalWriteFile);
     }
