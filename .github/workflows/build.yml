@@ -1,0 +1,25 @@
+name: Build Serial DLL
+
+on: [push, workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: windows-2019
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Add MSBuild to PATH
+      uses: microsoft/setup-msbuild@v1.1
+
+    - name: Compile DLL via MSVC
+      shell: cmd
+      run: |
+        cl.exe /LD /EHsc dllmain.cpp /Fe:adb_serial_monitor.dll /link /INCREMENTAL:NO
+
+    - name: Upload DLL Artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: Compiled-Serial-DLL
+        path: adb_serial_monitor.dll
