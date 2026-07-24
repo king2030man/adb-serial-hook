@@ -1,4 +1,4 @@
-name: Build Serial DLL
+name: Build Serial DLL (x86)
 
 on: [push, workflow_dispatch]
 
@@ -10,7 +10,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Compile DLL via Developer Command Prompt
+    - name: Configure MSVC for x86 (32-bit)
       uses: ilammy/msvc-dev-cmd@v1
       with:
         arch: x86
@@ -18,10 +18,10 @@ jobs:
     - name: Build Code
       shell: cmd
       run: |
-        cl.exe /LD /EHsc dllmain.cpp /Fe:adb_serial_monitor.dll /link /INCREMENTAL:NO
+        cl.exe /LD /EHsc dllmain.cpp /Fe:adb_serial_monitor.dll /link /INCREMENTAL:NO /MACHINE:X86
 
     - name: Upload DLL Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Compiled-Serial-DLL
+        name: Compiled-Serial-DLL-x86
         path: adb_serial_monitor.dll
