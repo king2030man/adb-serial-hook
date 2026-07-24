@@ -10,10 +10,12 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v2
+    - name: Compile DLL via Developer Command Prompt
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: x86
 
-    - name: Compile DLL via MSVC
+    - name: Build Code
       shell: cmd
       run: |
         cl.exe /LD /EHsc dllmain.cpp /Fe:adb_serial_monitor.dll /link /INCREMENTAL:NO
