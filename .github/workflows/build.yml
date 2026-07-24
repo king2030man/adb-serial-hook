@@ -8,10 +8,10 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/upload-artifact@v4
+      uses: actions/checkout@v4
 
     - name: Add MSBuild to PATH
-      uses: microsoft/setup-msbuild@v1.1
+      uses: microsoft/setup-msbuild@v2
 
     - name: Compile DLL via MSVC
       shell: cmd
@@ -19,7 +19,7 @@ jobs:
         cl.exe /LD /EHsc dllmain.cpp /Fe:adb_serial_monitor.dll /link /INCREMENTAL:NO
 
     - name: Upload DLL Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: Compiled-Serial-DLL
         path: adb_serial_monitor.dll
