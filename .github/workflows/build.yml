@@ -1,4 +1,4 @@
-name: Build Fixed Serial DLL
+name: Build Lua Hook DLL
 
 on: [push, workflow_dispatch]
 
@@ -10,18 +10,18 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Force Developer Prompt x86
+    - name: Configure MSVC for x86 (32-bit)
       uses: ilammy/msvc-dev-cmd@v1
       with:
         arch: x86
 
-    - name: Compile 32-Bit Proxy DLL
+    - name: Compile Lua Proxy DLL
       shell: cmd
       run: |
-        cl.exe /LD /EHsc dllmain.cpp /Fe:version.dll /link /INCREMENTAL:NO /MACHINE:X86
+        cl.exe /LD /EHsc dllmain.cpp /Fe:lua5.1.dll /link /INCREMENTAL:NO /MACHINE:X86
 
     - name: Upload DLL
       uses: actions/upload-artifact@v4
       with:
-        name: Version-Proxy-DLL
-        path: version.dll
+        name: Lua-Proxy-DLL
+        path: lua5.1.dll
