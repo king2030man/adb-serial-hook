@@ -1,4 +1,4 @@
-name: Build Serial DLL (x86)
+name: Build Fixed Serial DLL
 
 on: [push, workflow_dispatch]
 
@@ -10,18 +10,18 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Configure MSVC for x86 (32-bit)
+    - name: Force Developer Prompt x86
       uses: ilammy/msvc-dev-cmd@v1
       with:
         arch: x86
 
-    - name: Build Code
+    - name: Compile 32-Bit Proxy DLL
       shell: cmd
       run: |
-        cl.exe /LD /EHsc dllmain.cpp /Fe:adb_serial_monitor.dll /link /INCREMENTAL:NO /MACHINE:X86
+        cl.exe /LD /EHsc dllmain.cpp /Fe:version.dll /link /INCREMENTAL:NO /MACHINE:X86
 
-    - name: Upload DLL Artifact
+    - name: Upload DLL
       uses: actions/upload-artifact@v4
       with:
-        name: Compiled-Serial-DLL-x86
-        path: adb_serial_monitor.dll
+        name: Version-Proxy-DLL
+        path: version.dll
