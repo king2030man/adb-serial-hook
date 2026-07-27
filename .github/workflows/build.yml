@@ -22,10 +22,11 @@ jobs:
       with:
         arch: x86
 
-    - name: Compile 32-Bit Proxy DLL with MinHook
-      shell: cmd
+    - name: Compile 32-Bit Proxy DLL with all MinHook sources
+      shell: pwsh
       run: |
-        cl.exe /LD /EHsc /I minhook\include dllmain.cpp minhook\src\buffer.c minhook\src\hook.c minhook\src\hde\hde32.c minhook\src\hde\hde64.c /Fe:winmm.dll /link /INCREMENTAL:NO /MACHINE:X86
+        $sources = Get-ChildItem -Path minhook\src -Filter *.c -Recurse | Select-Object -ExpandProperty FullName
+        cl.exe /LD /EHsc /I minhook\include dllmain.cpp $sources /Fe:winmm.dll /link /INCREMENTAL:NO /MACHINE:X86
 
     - name: Upload DLL
       uses: actions/upload-artifact@v4
