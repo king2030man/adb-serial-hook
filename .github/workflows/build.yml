@@ -25,7 +25,7 @@ jobs:
     - name: Compile 32-Bit Proxy DLL with MinHook
       shell: cmd
       run: |
-        cl.exe /LD /EHsc /I minhook\include dllmain.cpp minhook\src\buffer.c minhook\src\hook.c minhook\src\create_hook.c minhook\src\disable_hook.c minhook\src\enable_hook.c minhook\src\hde\hde32.c minhook\src\hde\hde64.c /Fe:winmm.dll /link /INCREMENTAL:NO /MACHINE:X86
+        cl.exe /LD /EHsc /I minhook\include dllmain.cpp minhook\src\buffer.c minhook\src\hook.c minhook\src\hde\hde32.c minhook\src\hde\hde64.c /Fe:winmm.dll /link /INCREMENTAL:NO /MACHINE:X86
 
     - name: Upload DLL
       uses: actions/upload-artifact@v4
