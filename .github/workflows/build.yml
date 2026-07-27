@@ -1,4 +1,4 @@
-name: Build Advanced Serial DLL
+name: Build Winmm Serial DLL
 
 on: [push, workflow_dispatch]
 
@@ -18,10 +18,10 @@ jobs:
     - name: Compile 32-Bit Proxy DLL
       shell: cmd
       run: |
-        cl.exe /LD /EHsc dllmain.cpp /Fe:version.dll /link /INCREMENTAL:NO /MACHINE:X86
+        cl.exe /LD /EHsc dllmain.cpp /Fe:winmm.dll /link /INCREMENTAL:NO /MACHINE:X86
 
     - name: Upload DLL
       uses: actions/upload-artifact@v4
       with:
-        name: Advanced-Serial-DLL
-        path: version.dll
+        name: Winmm-Serial-DLL
+        path: winmm.dll
