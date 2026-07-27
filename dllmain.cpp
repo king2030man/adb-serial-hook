@@ -247,12 +247,12 @@ BOOL WINAPI HookedDeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode, LPVOID 
 }
 
 // اعتراض NtWriteFile (دالة النواة العميقة)
-NTSTATUS NTAPI HookedNtWriteFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset, PULONG Key) {
+NTSTATUS NTAPI HookedNtDeviceIoControlFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, ULONG IoControlCode, PVOID InputBuffer, ULONG InputBufferLength, PVOID OutputBuffer, ULONG OutputBufferLength) {
     // تم تعطيل تسجيل هذا الأمر لأنه مجرد ضجيج من نظام ويندوز (Baud rate etc)
     /*if (IsComHandle(FileHandle) && InputBuffer != NULL && InputBufferLength > 0) {
         LogSerialData("COMMAND (NtIoControl)", (BYTE*)InputBuffer, InputBufferLength);
     }*/
-    return pOriginalNtWriteFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, Buffer, Length, ByteOffset, Key);
+    return pOriginalNtDeviceIoControlFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, IoControlCode, InputBuffer, InputBufferLength, OutputBuffer, OutputBufferLength);
 }
 
 // اعتراض NtDeviceIoControlFile (دالة النواة العميقة للتحكم بالأجهزة)
