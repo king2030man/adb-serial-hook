@@ -248,9 +248,10 @@ BOOL WINAPI HookedDeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode, LPVOID 
 
 // اعتراض NtWriteFile (دالة النواة العميقة)
 NTSTATUS NTAPI HookedNtWriteFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset, PULONG Key) {
-    if (IsComHandle(FileHandle) && Buffer != NULL && Length > 0) {
-        LogSerialData("COMMAND (NtWriteFile)", (BYTE*)Buffer, Length);
-    }
+    // تم تعطيل تسجيل هذا الأمر لأنه مجرد ضجيج من نظام ويندوز (Baud rate etc)
+    /*if (IsComHandle(FileHandle) && InputBuffer != NULL && InputBufferLength > 0) {
+        LogSerialData("COMMAND (NtIoControl)", (BYTE*)InputBuffer, InputBufferLength);
+    }*/
     return pOriginalNtWriteFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, Buffer, Length, ByteOffset, Key);
 }
 
