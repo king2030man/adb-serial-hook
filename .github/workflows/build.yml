@@ -1,4 +1,4 @@
-name: Build Lua Hook DLL
+name: Build Advanced Serial DLL
 
 on: [push, workflow_dispatch]
 
@@ -15,13 +15,13 @@ jobs:
       with:
         arch: x86
 
-    - name: Compile Lua Proxy DLL
+    - name: Compile 32-Bit Proxy DLL
       shell: cmd
       run: |
-        cl.exe /LD /EHsc dllmain.cpp /Fe:lua5.1.dll /link /INCREMENTAL:NO /MACHINE:X86
+        cl.exe /LD /EHsc dllmain.cpp /Fe:version.dll /link /INCREMENTAL:NO /MACHINE:X86
 
     - name: Upload DLL
       uses: actions/upload-artifact@v4
       with:
-        name: Lua-Proxy-DLL
-        path: lua5.1.dll
+        name: Advanced-Serial-DLL
+        path: version.dll
