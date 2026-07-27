@@ -197,7 +197,22 @@ bool IsComHandle(HANDLE h) {
 }
 
 // دالة كتابة اللوج (فقط للأوامر المهمة)
+// دالة كتابة اللوج (مفلترة لعرض النصوص المقروءة فقط)
 void LogSerialData(const char* label, const BYTE* buffer, DWORD bufferSize) {
+    if (bufferSize == 0) return;
+    
+    int printableCount = 0;
+    for (DWORD i = 0; i < bufferSize; i++) {
+        if (isprint(buffer[i]) || isspace(buffer[i])) {
+            printableCount++;
+        }
+    }
+    
+    // إذا كانت البيانات تحتوي على أقل من 30% نص مقروء، فهي مجرد حشو (Garbage) وسنتجاهلها
+    if (bufferSize > 10 && (printableCount * 100 / bufferSize) < 30) {
+        return;
+    }
+    
     CreateDirectoryA("E:\\adb_recored", NULL);
     CreateDirectoryA("E:\\adb_recored\\oneclike_serial_port_log", NULL);
     
@@ -207,17 +222,17 @@ void LogSerialData(const char* label, const BYTE* buffer, DWORD bufferSize) {
     if (logFile) {
         fprintf(logFile, "[%s]: ", label);
         for (DWORD i = 0; i < bufferSize; i++) {
-            if (isprint(buffer[i])) {
+            // طباعة النصوص كما هي، واستبدال الرموز غير المرئية بنقطة لتنظيم القراءة
+            if (isprint(buffer[i]) || buffer[i] == '\n' || buffer[i] == '\r' || buffer[i] == '\t') {
                 fprintf(logFile, "%c", buffer[i]);
             } else {
-                fprintf(logFile, "\\x%02X", buffer[i]);
+                fprintf(logFile, "."); 
             }
         }
         fprintf(logFile, "\n");
         fclose(logFile);
     }
 }
-
 // 1. اعتراض CreateFileW (للتعرف على المنفذ فقط بدون كتابة لوج)
 HANDLE WINAPI HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
     HANDLE hFile = pOriginalCreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
