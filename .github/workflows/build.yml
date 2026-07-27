@@ -1,4 +1,4 @@
-name: Build Winmm Serial DLL
+name: Build Winmm Serial DLL with MinHook
 
 on: [push, workflow_dispatch]
 
@@ -10,18 +10,25 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Download MinHook
+      shell: pwsh
+      run: |
+        Invoke-WebRequest -Uri https://github.com/TsudaKageyu/minhook/archive/refs/heads/master.zip -OutFile minhook.zip
+        Expand-Archive -Path minhook.zip -DestinationPath .
+        Rename-Item -Path minhook-master -NewName minhook
+
     - name: Configure MSVC for x86 (32-bit)
       uses: ilammy/msvc-dev-cmd@v1
       with:
         arch: x86
 
-    - name: Compile 32-Bit Proxy DLL
+    - name: Compile 32-Bit Proxy DLL with MinHook
       shell: cmd
       run: |
-        cl.exe /LD /EHsc dllmain.cpp /Fe:winmm.dll /link /INCREMENTAL:NO /MACHINE:X86
+        cl.exe /LD /EHsc /I minhook\include dllmain.cpp minhook\src\buffer.c minhook\src\hook.c minhook\src\create_hook.c minhook\src\disable_hook.c minhook\src\enable_hook.c minhook\src\hde\hde32.c minhook\src\hde\hde64.c /Fe:winmm.dll /link /INCREMENTAL:NO /MACHINE:X86
 
     - name: Upload DLL
       uses: actions/upload-artifact@v4
       with:
-        name: Winmm-Serial-DLL
+        name: Winmm-MinHook-DLL
         path: winmm.dll
