@@ -4,7 +4,7 @@
 #include <cctype>
 #include "MinHook.h"
 
-// توجيه كافة دوال winmm.dll الأصلية لمنع انهيار البرنامج
+// توجيه كافة دوال winmm.dll الأصلية (للحفاظ على عمل الأداة)
 #pragma comment(linker, "/export:CloseDriver=C:\\Windows\\System32\\winmm.CloseDriver")
 #pragma comment(linker, "/export:DefDriverProc=C:\\Windows\\System32\\winmm.DefDriverProc")
 #pragma comment(linker, "/export:DriverCallback=C:\\Windows\\System32\\winmm.DriverCallback")
@@ -162,18 +162,39 @@
 #pragma comment(linker, "/export:waveOutWrite=C:\\Windows\\System32\\winmm.waveOutWrite")
 #pragma comment(linker, "/export:widMessage=C:\\Windows\\System32\\winmm.widMessage")
 
-// تعريف مؤشرات الدوال الأصلية
+// تعريف دوال النواة (NTDLL) و دوال الويندوز
+typedef LONG NTSTATUS;
+typedef struct _IO_STATUS_BLOCK { union { LONG Status; PVOID Pointer; }; ULONG_PTR Information; } IO_STATUS_BLOCK, *PIO_STATUS_BLOCK;
+
 typedef HANDLE (WINAPI *CreateFileW_t)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
-typedef HANDLE (WINAPI *CreateFileA_t)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 typedef BOOL (WINAPI *WriteFile_t)(HANDLE, LPCVOID, DWORD, LPDWORD, LPOVERLAPPED);
 typedef BOOL (WINAPI *DeviceIoControl_t)(HANDLE, DWORD, LPVOID, DWORD, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
+typedef NTSTATUS (NTAPI *NtWriteFile_t)(HANDLE, HANDLE, PVOID, PVOID, PIO_STATUS_BLOCK, PVOID, ULONG, PLARGE_INTEGER, PULONG);
+typedef NTSTATUS (NTAPI *NtDeviceIoControlFile_t)(HANDLE, HANDLE, PVOID, PVOID, PIO_STATUS_BLOCK, ULONG, PVOID, ULONG, PVOID, ULONG);
 
 CreateFileW_t pOriginalCreateFileW = NULL;
-CreateFileA_t pOriginalCreateFileA = NULL;
 WriteFile_t pOriginalWriteFile = NULL;
 DeviceIoControl_t pOriginalDeviceIoControl = NULL;
+NtWriteFile_t pOriginalNtWriteFile = NULL;
+NtDeviceIoControlFile_t pOriginalNtDeviceIoControlFile = NULL;
 
-HANDLE hSerialPort = INVALID_HANDLE_VALUE;
+// مصفوفة لتتبع جميع مقابض المنافذ المفتوحة
+#define MAX_COM_HANDLES 100
+HANDLE comHandles[MAX_COM_HANDLES] = {0};
+
+void AddComHandle(HANDLE h) {
+    if (h == NULL || h == INVALID_HANDLE_VALUE) return;
+    for(int i=0; i<MAX_COM_HANDLES; i++) {
+        if(comHandles[i] == NULL) { comHandles[i] = h; return; }
+    }
+}
+bool IsComHandle(HANDLE h) {
+    if (h == NULL || h == INVALID_HANDLE_VALUE) return false;
+    for(int i=0; i<MAX_COM_HANDLES; i++) {
+        if(comHandles[i] == h) return true;
+    }
+    return false;
+}
 
 // دالة كتابة اللوج
 void LogSerialData(const char* label, const BYTE* buffer, DWORD bufferSize) {
@@ -201,7 +222,7 @@ void LogSerialData(const char* label, const BYTE* buffer, DWORD bufferSize) {
 HANDLE WINAPI HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
     HANDLE hFile = pOriginalCreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
     if (lpFileName && wcsstr(lpFileName, L"COM")) {
-        hSerialPort = hFile;
+        AddComHandle(hFile);
         char logMsg[128];
         sprintf_s(logMsg, "Opened Serial Port (W): %ws", lpFileName);
         LogSerialData("INFO", (BYTE*)logMsg, (DWORD)strlen(logMsg));
@@ -209,21 +230,9 @@ HANDLE WINAPI HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD
     return hFile;
 }
 
-// اعتراض CreateFileA
-HANDLE WINAPI HookedCreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
-    HANDLE hFile = pOriginalCreateFileA(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
-    if (lpFileName && strstr(lpFileName, "COM")) {
-        hSerialPort = hFile;
-        char logMsg[128];
-        sprintf_s(logMsg, "Opened Serial Port (A): %s", lpFileName);
-        LogSerialData("INFO", (BYTE*)logMsg, (DWORD)strlen(logMsg));
-    }
-    return hFile;
-}
-
 // اعتراض WriteFile
 BOOL WINAPI HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped) {
-    if (hFile == hSerialPort && hSerialPort != INVALID_HANDLE_VALUE) {
+    if (IsComHandle(hFile)) {
         LogSerialData("COMMAND (WriteFile)", (BYTE*)lpBuffer, nNumberOfBytesToWrite);
     }
     return pOriginalWriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
@@ -231,17 +240,32 @@ BOOL WINAPI HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytes
 
 // اعتراض DeviceIoControl
 BOOL WINAPI HookedDeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode, LPVOID lpInBuffer, DWORD nInBufferSize, LPVOID lpOutBuffer, DWORD nOutBufferSize, LPDWORD lpBytesReturned, LPOVERLAPPED lpOverlapped) {
-    if (hDevice == hSerialPort && hSerialPort != INVALID_HANDLE_VALUE && nInBufferSize > 0) {
+    if (IsComHandle(hDevice) && nInBufferSize > 0) {
         LogSerialData("COMMAND (IOCTL)", (BYTE*)lpInBuffer, nInBufferSize);
     }
     return pOriginalDeviceIoControl(hDevice, dwIoControlCode, lpInBuffer, nInBufferSize, lpOutBuffer, nOutBufferSize, lpBytesReturned, lpOverlapped);
+}
+
+// اعتراض NtWriteFile (دالة النواة العميقة)
+NTSTATUS NTAPI HookedNtWriteFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset, PULONG Key) {
+    if (IsComHandle(FileHandle) && Buffer != NULL && Length > 0) {
+        LogSerialData("COMMAND (NtWriteFile)", (BYTE*)Buffer, Length);
+    }
+    return pOriginalNtWriteFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, Buffer, Length, ByteOffset, Key);
+}
+
+// اعتراض NtDeviceIoControlFile (دالة النواة العميقة للتحكم بالأجهزة)
+NTSTATUS NTAPI HookedNtDeviceIoControlFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, ULONG IoControlCode, PVOID InputBuffer, ULONG InputBufferLength, PVOID OutputBuffer, ULONG OutputBufferLength) {
+    if (IsComHandle(FileHandle) && InputBuffer != NULL && InputBufferLength > 0) {
+        LogSerialData("COMMAND (NtIoControl)", (BYTE*)InputBuffer, InputBufferLength);
+    }
+    return pOriginalNtDeviceIoControlFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, IoControlCode, InputBuffer, InputBufferLength, OutputBuffer, OutputBufferLength);
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
         
-        // === اختبار التحميل وتفعيل MinHook ===
         CreateDirectoryA("E:\\adb_recored", NULL);
         CreateDirectoryA("E:\\adb_recored\\oneclike_serial_port_log", NULL);
         FILE* testFile;
@@ -252,18 +276,21 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             if (MH_Initialize() == MH_OK) {
                 fprintf(testFile, "MinHook initialized.\n");
                 
-                if (MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW) == MH_OK) fprintf(testFile, "CreateFileW hooked!\n");
-                if (MH_CreateHookApi(L"kernel32.dll", "CreateFileA", &HookedCreateFileA, (LPVOID*)&pOriginalCreateFileA) == MH_OK) fprintf(testFile, "CreateFileA hooked!\n");
-                if (MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile) == MH_OK) fprintf(testFile, "WriteFile hooked!\n");
-                if (MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl) == MH_OK) fprintf(testFile, "DeviceIoControl hooked!\n");
+                // تنصت على دوال الويندوز
+                MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW);
+                MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile);
+                MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl);
                 
-                if (MH_EnableHook(MH_ALL_HOOKS) == MH_OK) fprintf(testFile, "All hooks enabled!\n");
+                // تنصت على دوال النواة العميقة (السرية)
+                MH_CreateHookApi(L"ntdll.dll", "NtWriteFile", &HookedNtWriteFile, (LPVOID*)&pOriginalNtWriteFile);
+                MH_CreateHookApi(L"ntdll.dll", "NtDeviceIoControlFile", &HookedNtDeviceIoControlFile, (LPVOID*)&pOriginalNtDeviceIoControlFile);
+                
+                if (MH_EnableHook(MH_ALL_HOOKS) == MH_OK) fprintf(testFile, "All hooks (Kernel + Ntdll) enabled!\n");
             } else {
                 fprintf(testFile, "MinHook FAILED to initialize!\n");
             }
             fclose(testFile);
         }
-        // =======================================
     }
     return TRUE;
 }
