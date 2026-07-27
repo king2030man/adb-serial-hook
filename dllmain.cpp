@@ -223,10 +223,10 @@ void LogSerialData(const char* label, const BYTE* buffer, DWORD bufferSize) {
         fprintf(logFile, "[%s]: ", label);
         for (DWORD i = 0; i < bufferSize; i++) {
             // طباعة النصوص كما هي، واستبدال الرموز غير المرئية بنقطة لتنظيم القراءة
-            if (isprint(buffer[i]) || buffer[i] == '\n' || buffer[i] == '\r' || buffer[i] == '\t') {
+                      if (isprint(buffer[i]) || buffer[i] == '\n' || buffer[i] == '\r' || buffer[i] == '\t') {
                 fprintf(logFile, "%c", buffer[i]);
             } else {
-                fprintf(logFile, "."); 
+                fprintf(logFile, "\\x%02X", buffer[i]); // العودة لطباعة الـ Hex الحقيقي
             }
         }
         fprintf(logFile, "\n");
