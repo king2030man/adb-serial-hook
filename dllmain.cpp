@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cctype>
+#include "MinHook.h"
 
 // توجيه كافة دوال winmm.dll الأصلية لمنع انهيار البرنامج
 #pragma comment(linker, "/export:CloseDriver=C:\\Windows\\System32\\winmm.CloseDriver")
@@ -236,65 +237,33 @@ BOOL WINAPI HookedDeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode, LPVOID 
     return pOriginalDeviceIoControl(hDevice, dwIoControlCode, lpInBuffer, nInBufferSize, lpOutBuffer, nOutBufferSize, lpBytesReturned, lpOverlapped);
 }
 
-// دالة الحقن الآمنة
-void IATHook(const char* dllName, const char* funcName, LPVOID hookedFunc, LPVOID* origFunc) {
-    HMODULE hMods = GetModuleHandleW(NULL);
-    PIMAGE_DOS_HEADER pDosHeader = (PIMAGE_DOS_HEADER)hMods;
-    if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE) return;
-
-    PIMAGE_NT_HEADERS pNtHeaders = (PIMAGE_NT_HEADERS)((BYTE*)hMods + pDosHeader->e_lfanew);
-    PIMAGE_IMPORT_DESCRIPTOR pImportDesc = (PIMAGE_IMPORT_DESCRIPTOR)((BYTE*)hMods + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress);
-
-    while (pImportDesc->Name) {
-        char* name = (char*)((BYTE*)hMods + pImportDesc->Name);
-        if (_stricmp(name, dllName) == 0) {
-            PIMAGE_THUNK_DATA pThunk = (PIMAGE_THUNK_DATA)((BYTE*)hMods + pImportDesc->FirstThunk);
-            PIMAGE_THUNK_DATA pOrigThunk = (PIMAGE_THUNK_DATA)((BYTE*)hMods + pImportDesc->OriginalFirstThunk);
-
-            while (pThunk->u1.Function) {
-                PROC* pFuncAddr = (PROC*)&pThunk->u1.Function;
-                PIMAGE_IMPORT_BY_NAME pImportByName = (PIMAGE_IMPORT_BY_NAME)((BYTE*)hMods + pOrigThunk->u1.AddressOfData);
-                
-                if (strcmp((char*)pImportByName->Name, funcName) == 0) {
-                    DWORD oldProtect;
-                    VirtualProtect(pFuncAddr, sizeof(PROC), PAGE_READWRITE, &oldProtect);
-                    *origFunc = (LPVOID)*pFuncAddr;
-                    *pFuncAddr = (PROC)hookedFunc;
-                    VirtualProtect(pFuncAddr, sizeof(PROC), oldProtect, &oldProtect);
-                    return;
-                }
-                pThunk++;
-                pOrigThunk++;
-            }
-        }
-        pImportDesc++;
-    }
-}
-
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
         
-        // === اختبار التحميل ===
+        // === اختبار التحميل وتفعيل MinHook ===
         CreateDirectoryA("E:\\adb_recored", NULL);
         CreateDirectoryA("E:\\adb_recored\\oneclike_serial_port_log", NULL);
         FILE* testFile;
         fopen_s(&testFile, "E:\\adb_recored\\oneclike_serial_port_log\\dll_loaded.txt", "w");
         if (testFile) {
-            fprintf(testFile, "winmm.dll is successfully loaded!\n");
+            fprintf(testFile, "winmm.dll loaded successfully!\n");
+            
+            if (MH_Initialize() == MH_OK) {
+                fprintf(testFile, "MinHook initialized.\n");
+                
+                if (MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW) == MH_OK) fprintf(testFile, "CreateFileW hooked!\n");
+                if (MH_CreateHookApi(L"kernel32.dll", "CreateFileA", &HookedCreateFileA, (LPVOID*)&pOriginalCreateFileA) == MH_OK) fprintf(testFile, "CreateFileA hooked!\n");
+                if (MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile) == MH_OK) fprintf(testFile, "WriteFile hooked!\n");
+                if (MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl) == MH_OK) fprintf(testFile, "DeviceIoControl hooked!\n");
+                
+                if (MH_EnableHook(MH_ALL_HOOKS) == MH_OK) fprintf(testFile, "All hooks enabled!\n");
+            } else {
+                fprintf(testFile, "MinHook FAILED to initialize!\n");
+            }
             fclose(testFile);
         }
-        // ======================
-
-        pOriginalCreateFileW = (CreateFileW_t)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "CreateFileW");
-        pOriginalCreateFileA = (CreateFileA_t)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "CreateFileA");
-        pOriginalWriteFile = (WriteFile_t)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "WriteFile");
-        pOriginalDeviceIoControl = (DeviceIoControl_t)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "DeviceIoControl");
-
-        IATHook("kernel32.dll", "CreateFileW", (LPVOID)HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW);
-        IATHook("kernel32.dll", "CreateFileA", (LPVOID)HookedCreateFileA, (LPVOID*)&pOriginalCreateFileA);
-        IATHook("kernel32.dll", "WriteFile", (LPVOID)HookedWriteFile, (LPVOID*)&pOriginalWriteFile);
-        IATHook("kernel32.dll", "DeviceIoControl", (LPVOID)HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl);
+        // =======================================
     }
     return TRUE;
 }
