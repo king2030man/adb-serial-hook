@@ -196,7 +196,7 @@ bool IsComHandle(HANDLE h) {
     return false;
 }
 
-// دالة كتابة اللوج
+// دالة كتابة اللوج (فقط للأوامر المهمة)
 void LogSerialData(const char* label, const BYTE* buffer, DWORD bufferSize) {
     CreateDirectoryA("E:\\adb_recored", NULL);
     CreateDirectoryA("E:\\adb_recored\\oneclike_serial_port_log", NULL);
@@ -218,48 +218,38 @@ void LogSerialData(const char* label, const BYTE* buffer, DWORD bufferSize) {
     }
 }
 
-// اعتراض CreateFileW
+// 1. اعتراض CreateFileW (للتعرف على المنفذ فقط بدون كتابة لوج)
 HANDLE WINAPI HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
     HANDLE hFile = pOriginalCreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
     if (lpFileName && wcsstr(lpFileName, L"COM")) {
-        AddComHandle(hFile);
-        char logMsg[128];
-        sprintf_s(logMsg, "Opened Serial Port (W): %ws", lpFileName);
-        LogSerialData("INFO", (BYTE*)logMsg, (DWORD)strlen(logMsg));
+        AddComHandle(hFile); // حفظ المقبض فقط
     }
     return hFile;
 }
 
-// اعتراض WriteFile
+// 2. اعتراض WriteFile (للأوامر العادية - سيتم تسجيلها)
 BOOL WINAPI HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped) {
     if (IsComHandle(hFile)) {
-        LogSerialData("COMMAND (WriteFile)", (BYTE*)lpBuffer, nNumberOfBytesToWrite);
+        LogSerialData("COMMAND", (BYTE*)lpBuffer, nNumberOfBytesToWrite);
     }
     return pOriginalWriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
 }
 
-// اعتراض DeviceIoControl
+// 3. اعتراض DeviceIoControl (لن يتم تسجيله - مجرد ضجيج)
 BOOL WINAPI HookedDeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode, LPVOID lpInBuffer, DWORD nInBufferSize, LPVOID lpOutBuffer, DWORD nOutBufferSize, LPDWORD lpBytesReturned, LPOVERLAPPED lpOverlapped) {
-    if (IsComHandle(hDevice) && nInBufferSize > 0) {
-        LogSerialData("COMMAND (IOCTL)", (BYTE*)lpInBuffer, nInBufferSize);
-    }
     return pOriginalDeviceIoControl(hDevice, dwIoControlCode, lpInBuffer, nInBufferSize, lpOutBuffer, nOutBufferSize, lpBytesReturned, lpOverlapped);
 }
 
-// اعتراض NtWriteFile (دالة النواة العميقة)
-NTSTATUS NTAPI HookedNtDeviceIoControlFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, ULONG IoControlCode, PVOID InputBuffer, ULONG InputBufferLength, PVOID OutputBuffer, ULONG OutputBufferLength) {
-    // تم تعطيل تسجيل هذا الأمر لأنه مجرد ضجيج من نظام ويندوز (Baud rate etc)
-    /*if (IsComHandle(FileHandle) && InputBuffer != NULL && InputBufferLength > 0) {
-        LogSerialData("COMMAND (NtIoControl)", (BYTE*)InputBuffer, InputBufferLength);
-    }*/
-    return pOriginalNtDeviceIoControlFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, IoControlCode, InputBuffer, InputBufferLength, OutputBuffer, OutputBufferLength);
+// 4. اعتراض NtWriteFile (دالة النواة العميقة - سيتم تسجيلها)
+NTSTATUS NTAPI HookedNtWriteFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset, PULONG Key) {
+    if (IsComHandle(FileHandle) && Buffer != NULL && Length > 0) {
+        LogSerialData("COMMAND", (BYTE*)Buffer, Length);
+    }
+    return pOriginalNtWriteFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, Buffer, Length, ByteOffset, Key);
 }
 
-// اعتراض NtDeviceIoControlFile (دالة النواة العميقة للتحكم بالأجهزة)
+// 5. اعتراض NtDeviceIoControlFile (لن يتم تسجيله - مجرد ضجيج)
 NTSTATUS NTAPI HookedNtDeviceIoControlFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, ULONG IoControlCode, PVOID InputBuffer, ULONG InputBufferLength, PVOID OutputBuffer, ULONG OutputBufferLength) {
-    if (IsComHandle(FileHandle) && InputBuffer != NULL && InputBufferLength > 0) {
-        LogSerialData("COMMAND (NtIoControl)", (BYTE*)InputBuffer, InputBufferLength);
-    }
     return pOriginalNtDeviceIoControlFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, IoControlCode, InputBuffer, InputBufferLength, OutputBuffer, OutputBufferLength);
 }
 
@@ -277,18 +267,13 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             if (MH_Initialize() == MH_OK) {
                 fprintf(testFile, "MinHook initialized.\n");
                 
-                // تنصت على دوال الويندوز
                 MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW);
                 MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile);
                 MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl);
-                
-                // تنصت على دوال النواة العميقة (السرية)
                 MH_CreateHookApi(L"ntdll.dll", "NtWriteFile", &HookedNtWriteFile, (LPVOID*)&pOriginalNtWriteFile);
                 MH_CreateHookApi(L"ntdll.dll", "NtDeviceIoControlFile", &HookedNtDeviceIoControlFile, (LPVOID*)&pOriginalNtDeviceIoControlFile);
                 
-                if (MH_EnableHook(MH_ALL_HOOKS) == MH_OK) fprintf(testFile, "All hooks (Kernel + Ntdll) enabled!\n");
-            } else {
-                fprintf(testFile, "MinHook FAILED to initialize!\n");
+                if (MH_EnableHook(MH_ALL_HOOKS) == MH_OK) fprintf(testFile, "All hooks enabled!\n");
             }
             fclose(testFile);
         }
