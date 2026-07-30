@@ -2,15 +2,17 @@
 #include <cstdio>
 #include <cstring>
 #include <cctype>
+#include <ctime>
 #include "MinHook.h"
 
-// توجيه كافة دوال winmm.dll الأصلية (للحفاظ على عمل الأداة)
+// ==========================================
+// 1. تضمين جميع دوال winmm.dll الأصلية
+// ==========================================
 #pragma comment(linker, "/export:CloseDriver=C:\\Windows\\System32\\winmm.CloseDriver")
 #pragma comment(linker, "/export:DefDriverProc=C:\\Windows\\System32\\winmm.DefDriverProc")
 #pragma comment(linker, "/export:DriverCallback=C:\\Windows\\System32\\winmm.DriverCallback")
 #pragma comment(linker, "/export:DrvGetModuleHandle=C:\\Windows\\System32\\winmm.DrvGetModuleHandle")
 #pragma comment(linker, "/export:GetDriverModuleHandle=C:\\Windows\\System32\\winmm.GetDriverModuleHandle")
-#pragma comment(linker, "/export:NotifyCallbackData=C:\\Windows\\System32\\winmm.NotifyCallbackData")
 #pragma comment(linker, "/export:OpenDriver=C:\\Windows\\System32\\winmm.OpenDriver")
 #pragma comment(linker, "/export:SendDriverMessage=C:\\Windows\\System32\\winmm.SendDriverMessage")
 #pragma comment(linker, "/export:auxGetDevCapsA=C:\\Windows\\System32\\winmm.auxGetDevCapsA")
@@ -33,20 +35,33 @@
 #pragma comment(linker, "/export:mciDriverYield=C:\\Windows\\System32\\winmm.mciDriverYield")
 #pragma comment(linker, "/export:mciExecute=C:\\Windows\\System32\\winmm.mciExecute")
 #pragma comment(linker, "/export:mciFreeCommandResource=C:\\Windows\\System32\\winmm.mciFreeCommandResource")
-#pragma comment(linker, "/export:mciGetCreatorTask=C:\\Windows\\System32\\winmm.mciGetCreatorTask")
+#pragma comment(linker, "/export:mciGetCommandResource=C:\\Windows\\System32\\winmm.mciGetCommandResource")
 #pragma comment(linker, "/export:mciGetDeviceIDA=C:\\Windows\\System32\\winmm.mciGetDeviceIDA")
-#pragma comment(linker, "/export:mciGetDeviceIDFromElementIDA=C:\\Windows\\System32\\winmm.mciGetDeviceIDFromElementIDA")
-#pragma comment(linker, "/export:mciGetDeviceIDFromElementIDW=C:\\Windows\\System32\\winmm.mciGetDeviceIDFromElementIDW")
 #pragma comment(linker, "/export:mciGetDeviceIDW=C:\\Windows\\System32\\winmm.mciGetDeviceIDW")
 #pragma comment(linker, "/export:mciGetErrorStringA=C:\\Windows\\System32\\winmm.mciGetErrorStringA")
 #pragma comment(linker, "/export:mciGetErrorStringW=C:\\Windows\\System32\\winmm.mciGetErrorStringW")
-#pragma comment(linker, "/export:mciLoadCommandResource=C:\\Windows\\System32\\winmm.mciLoadCommandResource")
 #pragma comment(linker, "/export:mciSendCommandA=C:\\Windows\\System32\\winmm.mciSendCommandA")
 #pragma comment(linker, "/export:mciSendCommandW=C:\\Windows\\System32\\winmm.mciSendCommandW")
 #pragma comment(linker, "/export:mciSendStringA=C:\\Windows\\System32\\winmm.mciSendStringA")
 #pragma comment(linker, "/export:mciSendStringW=C:\\Windows\\System32\\winmm.mciSendStringW")
 #pragma comment(linker, "/export:mciSetYieldProc=C:\\Windows\\System32\\winmm.mciSetYieldProc")
-#pragma comment(linker, "/export:midMessage=C:\\Windows\\System32\\winmm.midMessage")
+#pragma comment(linker, "/export:midiConnect=C:\\Windows\\System32\\winmm.midiConnect")
+#pragma comment(linker, "/export:midiDisconnect=C:\\Windows\\System32\\winmm.midiDisconnect")
+#pragma comment(linker, "/export:midiInAddBuffer=C:\\Windows\\System32\\winmm.midiInAddBuffer")
+#pragma comment(linker, "/export:midiInClose=C:\\Windows\\System32\\winmm.midiInClose")
+#pragma comment(linker, "/export:midiInGetDevCapsA=C:\\Windows\\System32\\winmm.midiInGetDevCapsA")
+#pragma comment(linker, "/export:midiInGetDevCapsW=C:\\Windows\\System32\\winmm.midiInGetDevCapsW")
+#pragma comment(linker, "/export:midiInGetErrorTextA=C:\\Windows\\System32\\winmm.midiInGetErrorTextA")
+#pragma comment(linker, "/export:midiInGetErrorTextW=C:\\Windows\\System32\\winmm.midiInGetErrorTextW")
+#pragma comment(linker, "/export:midiInGetID=C:\\Windows\\System32\\winmm.midiInGetID")
+#pragma comment(linker, "/export:midiInGetNumDevs=C:\\Windows\\System32\\winmm.midiInGetNumDevs")
+#pragma comment(linker, "/export:midiInMessage=C:\\Windows\\System32\\winmm.midiInMessage")
+#pragma comment(linker, "/export:midiInOpen=C:\\Windows\\System32\\winmm.midiInOpen")
+#pragma comment(linker, "/export:midiInPrepareHeader=C:\\Windows\\System32\\winmm.midiInPrepareHeader")
+#pragma comment(linker, "/export:midiInReset=C:\\Windows\\System32\\winmm.midiInReset")
+#pragma comment(linker, "/export:midiInStart=C:\\Windows\\System32\\winmm.midiInStart")
+#pragma comment(linker, "/export:midiInStop=C:\\Windows\\System32\\winmm.midiInStop")
+#pragma comment(linker, "/export:midiInUnprepareHeader=C:\\Windows\\System32\\winmm.midiInUnprepareHeader")
 #pragma comment(linker, "/export:midiOutCacheDrumPatches=C:\\Windows\\System32\\winmm.midiOutCacheDrumPatches")
 #pragma comment(linker, "/export:midiOutCachePatches=C:\\Windows\\System32\\winmm.midiOutCachePatches")
 #pragma comment(linker, "/export:midiOutClose=C:\\Windows\\System32\\winmm.midiOutClose")
@@ -87,29 +102,12 @@
 #pragma comment(linker, "/export:mixerMessage=C:\\Windows\\System32\\winmm.mixerMessage")
 #pragma comment(linker, "/export:mixerOpen=C:\\Windows\\System32\\winmm.mixerOpen")
 #pragma comment(linker, "/export:mixerSetControlDetails=C:\\Windows\\System32\\winmm.mixerSetControlDetails")
-#pragma comment(linker, "/export:mmioAdvance=C:\\Windows\\System32\\winmm.mmioAdvance")
-#pragma comment(linker, "/export:mmioAscend=C:\\Windows\\System32\\winmm.mmioAscend")
-#pragma comment(linker, "/export:mmioClose=C:\\Windows\\System32\\winmm.mmioClose")
-#pragma comment(linker, "/export:mmioCreateChunk=C:\\Windows\\System32\\winmm.mmioCreateChunk")
-#pragma comment(linker, "/export:mmioDescend=C:\\Windows\\System32\\winmm.mmioDescend")
-#pragma comment(linker, "/export:mmioFlush=C:\\Windows\\System32\\winmm.mmioFlush")
-#pragma comment(linker, "/export:mmioGetInfo=C:\\Windows\\System32\\winmm.mmioGetInfo")
-#pragma comment(linker, "/export:mmioInstallIOProcA=C:\\Windows\\System32\\winmm.mmioInstallIOProcA")
-#pragma comment(linker, "/export:mmioInstallIOProcW=C:\\Windows\\System32\\winmm.mmioInstallIOProcW")
-#pragma comment(linker, "/export:mmioOpenA=C:\\Windows\\System32\\winmm.mmioOpenA")
-#pragma comment(linker, "/export:mmioOpenW=C:\\Windows\\System32\\winmm.mmioOpenW")
-#pragma comment(linker, "/export:mmioRead=C:\\Windows\\System32\\winmm.mmioRead")
-#pragma comment(linker, "/export:mmioRenameA=C:\\Windows\\System32\\winmm.mmioRenameA")
-#pragma comment(linker, "/export:mmioRenameW=C:\\Windows\\System32\\winmm.mmioRenameW")
-#pragma comment(linker, "/export:mmioSeek=C:\\Windows\\System32\\winmm.mmioSeek")
-#pragma comment(linker, "/export:mmioSendMessage=C:\\Windows\\System32\\winmm.mmioSendMessage")
-#pragma comment(linker, "/export:mmioSetBuffer=C:\\Windows\\System32\\winmm.mmioSetBuffer")
-#pragma comment(linker, "/export:mmioSetInfo=C:\\Windows\\System32\\winmm.mmioSetInfo")
-#pragma comment(linker, "/export:mmioStringToFOURCCA=C:\\Windows\\System32\\winmm.mmioStringToFOURCCA")
-#pragma comment(linker, "/export:mmioStringToFOURCCW=C:\\Windows\\System32\\winmm.mmioStringToFOURCCW")
-#pragma comment(linker, "/export:mmioWrite=C:\\Windows\\System32\\winmm.mmioWrite")
-#pragma comment(linker, "/export:mmsystemGetVersion=C:\\Windows\\System32\\winmm.mmsystemGetVersion")
-#pragma comment(linker, "/export:modMessage=C:\\Windows\\System32\\winmm.modMessage")
+#pragma comment(linker, "/export:mmDrvInstall=C:\\Windows\\System32\\winmm.mmDrvInstall")
+#pragma comment(linker, "/export:mmGetCurrentTask=C:\\Windows\\System32\\winmm.mmGetCurrentTask")
+#pragma comment(linker, "/export:mmTaskBlock=C:\\Windows\\System32\\winmm.mmTaskBlock")
+#pragma comment(linker, "/export:mmTaskCreate=C:\\Windows\\System32\\winmm.mmTaskCreate")
+#pragma comment(linker, "/export:mmTaskSignal=C:\\Windows\\System32\\winmm.mmTaskSignal")
+#pragma comment(linker, "/export:mmTaskYield=C:\\Windows\\System32\\winmm.mmTaskYield")
 #pragma comment(linker, "/export:PlaySoundA=C:\\Windows\\System32\\winmm.PlaySoundA")
 #pragma comment(linker, "/export:PlaySoundW=C:\\Windows\\System32\\winmm.PlaySoundW")
 #pragma comment(linker, "/export:sndPlaySoundA=C:\\Windows\\System32\\winmm.sndPlaySoundA")
@@ -160,9 +158,10 @@
 #pragma comment(linker, "/export:waveOutSetVolume=C:\\Windows\\System32\\winmm.waveOutSetVolume")
 #pragma comment(linker, "/export:waveOutUnprepareHeader=C:\\Windows\\System32\\winmm.waveOutUnprepareHeader")
 #pragma comment(linker, "/export:waveOutWrite=C:\\Windows\\System32\\winmm.waveOutWrite")
-#pragma comment(linker, "/export:widMessage=C:\\Windows\\System32\\winmm.widMessage")
 
-// تعريف دوال النواة (NTDLL) و دوال الويندوز
+// ==========================================
+// 2. تعريفات MinHook والثوابت
+// ==========================================
 typedef LONG NTSTATUS;
 typedef struct _IO_STATUS_BLOCK { union { LONG Status; PVOID Pointer; }; ULONG_PTR Information; } IO_STATUS_BLOCK, *PIO_STATUS_BLOCK;
 
@@ -178,119 +177,161 @@ DeviceIoControl_t pOriginalDeviceIoControl = NULL;
 NtWriteFile_t pOriginalNtWriteFile = NULL;
 NtDeviceIoControlFile_t pOriginalNtDeviceIoControlFile = NULL;
 
-// مصفوفة لتتبع جميع مقابض المنافذ المفتوحة
-#define MAX_COM_HANDLES 100
-HANDLE comHandles[MAX_COM_HANDLES] = {0};
+#define MAX_HANDLES 200
 
-void AddComHandle(HANDLE h) {
+// هيكل لحفظ مقبض المنفذ واسمه
+struct HandleInfo {
+    HANDLE h;
+    wchar_t portName[256];
+};
+HandleInfo monitoredHandles[MAX_HANDLES] = {0};
+
+#define LOG_DIR "C:\\all_port_usb_mobile_monitor"
+#define LOG_FILE "C:\\all_port_usb_mobile_monitor\\usb_com_log.txt"
+
+// ==========================================
+// 3. دوال إدارة المقابض (Handles)
+// ==========================================
+void AddHandle(HANDLE h, LPCWSTR name) {
     if (h == NULL || h == INVALID_HANDLE_VALUE) return;
-    for(int i=0; i<MAX_COM_HANDLES; i++) {
-        if(comHandles[i] == NULL) { comHandles[i] = h; return; }
+    for(int i=0; i<MAX_HANDLES; i++) {
+        if(monitoredHandles[i].h == NULL) {
+            monitoredHandles[i].h = h;
+            if (name) wcscpy_s(monitoredHandles[i].portName, name);
+            else wcscpy_s(monitoredHandles[i].portName, L"Unknown");
+            return;
+        }
     }
 }
-bool IsComHandle(HANDLE h) {
-    if (h == NULL || h == INVALID_HANDLE_VALUE) return false;
-    for(int i=0; i<MAX_COM_HANDLES; i++) {
-        if(comHandles[i] == h) return true;
+
+bool GetPortName(HANDLE h, wchar_t* outName) {
+    for(int i=0; i<MAX_HANDLES; i++) {
+        if(monitoredHandles[i].h == h) {
+            wcscpy_s(outName, 256, monitoredHandles[i].portName);
+            return true;
+        }
     }
     return false;
 }
 
-// دالة كتابة اللوج (فقط للأوامر المهمة)
-// دالة كتابة اللوج (مفلترة لعرض النصوص المقروءة فقط)
-void LogSerialData(const char* label, const BYTE* buffer, DWORD bufferSize) {
-    if (bufferSize == 0) return;
+bool IsMonitored(HANDLE h) {
+    for(int i=0; i<MAX_HANDLES; i++) { if(monitoredHandles[i].h == h) return true; }
+    return false;
+}
+
+// ==========================================
+// 4. دالة كتابة اللوق المنظمة (محدثة)
+// ==========================================
+void LogData(const char* type, const wchar_t* portName, const BYTE* buffer, DWORD bufferSize) {
+    if (bufferSize == 0 || buffer == NULL) return;
     
+    // تصفية البيانات العشوائية
     int printableCount = 0;
-    for (DWORD i = 0; i < bufferSize; i++) {
-        if (isprint(buffer[i]) || isspace(buffer[i])) {
-            printableCount++;
-        }
-    }
+    for (DWORD i = 0; i < bufferSize; i++) { if (isprint(buffer[i]) || isspace(buffer[i])) printableCount++; }
+    if (bufferSize > 10 && (printableCount * 100 / bufferSize) < 20) return;
     
-    // إذا كانت البيانات تحتوي على أقل من 30% نص مقروء، فهي مجرد حشو (Garbage) وسنتجاهلها
-    if (bufferSize > 10 && (printableCount * 100 / bufferSize) < 30) {
-        return;
-    }
-    
-    CreateDirectoryA("E:\\adb_recored", NULL);
-    CreateDirectoryA("E:\\adb_recored\\oneclike_serial_port_log", NULL);
-    
-    const char* logPath = "E:\\adb_recored\\oneclike_serial_port_log\\serial_log.txt";
+    CreateDirectoryA(LOG_DIR, NULL);
     FILE* logFile;
-    fopen_s(&logFile, logPath, "a+");
+    fopen_s(&logFile, LOG_FILE, "a+");
     if (logFile) {
-        fprintf(logFile, "[%s]: ", label);
+        // كتابة العلامة والوقت عند كل عملية إرسال
+        time_t now = time(0);
+        tm tstruct;
+        char buf[80];
+        localtime_s(&tstruct, &now);
+        strftime(buf, sizeof(buf), "%Y-%m-%d %X", &tstruct);
+        
+        fprintf(logFile, "\n********************************\n");
+        fprintf(logFile, "Time: %s\n", buf);
+        
+        // تحويل اسم المنفذ من wchar_t إلى char عادي للطباعة
+        char portNameA[256];
+        wcstombs_s(NULL, portNameA, portName, 256);
+        fprintf(logFile, "Port: %s\n", portNameA);
+        
+        fprintf(logFile, "Type: %s\n", type);
+        fprintf(logFile, "Data: ");
+        
         for (DWORD i = 0; i < bufferSize; i++) {
-            // طباعة النصوص كما هي، واستبدال الرموز غير المرئية بنقطة لتنظيم القراءة
-                      if (isprint(buffer[i]) || buffer[i] == '\n' || buffer[i] == '\r' || buffer[i] == '\t') {
+            if (isprint(buffer[i]) || buffer[i] == '\n' || buffer[i] == '\r' || buffer[i] == '\t') {
                 fprintf(logFile, "%c", buffer[i]);
             } else {
-                fprintf(logFile, "\\x%02X", buffer[i]); // العودة لطباعة الـ Hex الحقيقي
+                fprintf(logFile, "\\x%02X", buffer[i]);
             }
         }
         fprintf(logFile, "\n");
         fclose(logFile);
     }
 }
-// 1. اعتراض CreateFileW (للتعرف على المنفذ فقط بدون كتابة لوج)
+
+// ==========================================
+// 5. دوال الـ Hooking (التنصت)
+// ==========================================
 HANDLE WINAPI HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
     HANDLE hFile = pOriginalCreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
-    if (lpFileName && wcsstr(lpFileName, L"COM")) {
-        AddComHandle(hFile); // حفظ المقبض فقط
+    if (lpFileName) {
+        if (wcsstr(lpFileName, L"COM") || wcsstr(lpFileName, L"\\\\?\\")) {
+            AddHandle(hFile, lpFileName);
+        }
     }
     return hFile;
 }
 
-// 2. اعتراض WriteFile (للأوامر العادية - سيتم تسجيلها)
 BOOL WINAPI HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped) {
-    if (IsComHandle(hFile)) {
-        LogSerialData("COMMAND", (BYTE*)lpBuffer, nNumberOfBytesToWrite);
+    if (IsMonitored(hFile)) {
+        wchar_t portName[256];
+        if (GetPortName(hFile, portName)) {
+            LogData("WRITE (COM/USB)", portName, (BYTE*)lpBuffer, nNumberOfBytesToWrite);
+        }
     }
     return pOriginalWriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
 }
 
-// 3. اعتراض DeviceIoControl (لن يتم تسجيله - مجرد ضجيج)
 BOOL WINAPI HookedDeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode, LPVOID lpInBuffer, DWORD nInBufferSize, LPVOID lpOutBuffer, DWORD nOutBufferSize, LPDWORD lpBytesReturned, LPOVERLAPPED lpOverlapped) {
-    return pOriginalDeviceIoControl(hDevice, dwIoControlCode, lpInBuffer, nInBufferSize, lpOutBuffer, nOutBufferSize, lpBytesReturned, lpOverlapped);
+    if (IsMonitored(hDevice) && lpInBuffer != NULL && nInBufferSize > 0) {
+        wchar_t portName[256];
+        if (GetPortName(hDevice, portName)) {
+            LogData("USB_IOCTL_SEND", portName, (BYTE*)lpInBuffer, nInBufferSize);
+        }
+    }
+    BOOL result = pOriginalDeviceIoControl(hDevice, dwIoControlCode, lpInBuffer, nInBufferSize, lpOutBuffer, nOutBufferSize, lpBytesReturned, lpOverlapped);
+    // تسجيل رد الهاتف أيضاً
+    if (IsMonitored(hDevice) && lpOutBuffer != NULL && lpBytesReturned != NULL && *lpBytesReturned > 0) {
+        wchar_t portName[256];
+        if (GetPortName(hDevice, portName)) {
+            LogData("USB_IOCTL_RESPONSE", portName, (BYTE*)lpOutBuffer, *lpBytesReturned);
+        }
+    }
+    return result;
 }
 
-// 4. اعتراض NtWriteFile (دالة النواة العميقة - سيتم تسجيلها)
 NTSTATUS NTAPI HookedNtWriteFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset, PULONG Key) {
-    if (IsComHandle(FileHandle) && Buffer != NULL && Length > 0) {
-        LogSerialData("COMMAND", (BYTE*)Buffer, Length);
+    if (IsMonitored(FileHandle) && Buffer != NULL && Length > 0) {
+        wchar_t portName[256];
+        if (GetPortName(FileHandle, portName)) {
+            LogData("NT_WRITE (COM/USB)", portName, (BYTE*)Buffer, Length);
+        }
     }
     return pOriginalNtWriteFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, Buffer, Length, ByteOffset, Key);
 }
 
-// 5. اعتراض NtDeviceIoControlFile (لن يتم تسجيله - مجرد ضجيج)
 NTSTATUS NTAPI HookedNtDeviceIoControlFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, ULONG IoControlCode, PVOID InputBuffer, ULONG InputBufferLength, PVOID OutputBuffer, ULONG OutputBufferLength) {
     return pOriginalNtDeviceIoControlFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, IoControlCode, InputBuffer, InputBufferLength, OutputBuffer, OutputBufferLength);
 }
 
+// ==========================================
+// 6. نقطة الدخول للـ DLL
+// ==========================================
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
-        
-        CreateDirectoryA("E:\\adb_recored", NULL);
-        CreateDirectoryA("E:\\adb_recored\\oneclike_serial_port_log", NULL);
-        FILE* testFile;
-        fopen_s(&testFile, "E:\\adb_recored\\oneclike_serial_port_log\\dll_loaded.txt", "w");
-        if (testFile) {
-            fprintf(testFile, "winmm.dll loaded successfully!\n");
-            
-            if (MH_Initialize() == MH_OK) {
-                fprintf(testFile, "MinHook initialized.\n");
-                
-                MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW);
-                MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile);
-                MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl);
-                MH_CreateHookApi(L"ntdll.dll", "NtWriteFile", &HookedNtWriteFile, (LPVOID*)&pOriginalNtWriteFile);
-                MH_CreateHookApi(L"ntdll.dll", "NtDeviceIoControlFile", &HookedNtDeviceIoControlFile, (LPVOID*)&pOriginalNtDeviceIoControlFile);
-                
-                if (MH_EnableHook(MH_ALL_HOOKS) == MH_OK) fprintf(testFile, "All hooks enabled!\n");
-            }
-            fclose(testFile);
+        if (MH_Initialize() == MH_OK) {
+            MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW);
+            MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile);
+            MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl);
+            MH_CreateHookApi(L"ntdll.dll", "NtWriteFile", &HookedNtWriteFile, (LPVOID*)&pOriginalNtWriteFile);
+            MH_CreateHookApi(L"ntdll.dll", "NtDeviceIoControlFile", &HookedNtDeviceIoControlFile, (LPVOID*)&pOriginalNtDeviceIoControlFile);
+            MH_EnableHook(MH_ALL_HOOKS);
         }
     }
     return TRUE;
