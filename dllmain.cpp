@@ -1,11 +1,12 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#include <winsock2.h> // تم إضافة مكتبة الشبكة لحل خطأ الـ GitHub Actions
+#include <winsock2.h>
 #include <ws2tcpip.h>
 #include <cstdio>
 #include <cstring>
 #include <cctype>
 #include <ctime>
+#include <cstdlib> // تم إضافتها لدعم دوال التحويل
 #include "MinHook.h"
 
 #pragma comment(lib, "ws2_32.lib")
@@ -123,7 +124,8 @@ void LogData(const char* type, const wchar_t* portName, const char* buffer, DWOR
         
         if (portName != NULL) {
             char portNameA[256];
-            wcstombs_s(NULL, portNameA, portName, 256);
+            // تم استبدال الدالة التي تسببت بالخطأ بدالة ويندوز الأصلية
+            WideCharToMultiByte(CP_ACP, 0, portName, -1, portNameA, 256, NULL, NULL);
             fprintf(logFile, "Port: %s\n", portNameA);
         } else {
             fprintf(logFile, "Port: INTERNET\n");
