@@ -3,7 +3,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <winhttp.h>
-#include <wininet.h> // تم إضافة مكتبة WinINet البديلة
+#include <wininet.h>
 #include <cstdio>
 #include <cstring>
 #include <cctype>
@@ -25,11 +25,10 @@ typedef HANDLE (WINAPI *CreateFileW_t)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBU
 typedef BOOL (WINAPI *WriteFile_t)(HANDLE, LPCVOID, DWORD, LPDWORD, LPOVERLAPPED);
 typedef BOOL (WINAPI *DeviceIoControl_t)(HANDLE, DWORD, LPVOID, DWORD, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
 typedef NTSTATUS (NTAPI *NtWriteFile_t)(HANDLE, HANDLE, PVOID, PVOID, PIO_STATUS_BLOCK, PVOID, ULONG, PLARGE_INTEGER, PULONG);
-
-// WinHTTP
+typedef int (WSAAPI *send_t)(SOCKET, const char*, int, int);
+typedef int (WSAAPI *recv_t)(SOCKET, char*, int, int);
 typedef BOOL (WINAPI *WinHttpSendRequest_t)(HINTERNET, LPCWSTR, DWORD, LPVOID, DWORD, DWORD, DWORD_PTR);
 typedef BOOL (WINAPI *WinHttpReadData_t)(HINTERNET, LPVOID, DWORD, LPDWORD);
-// WinINet
 typedef BOOL (WINAPI *HttpSendRequestW_t)(HINTERNET, LPCWSTR, DWORD, LPVOID, DWORD);
 typedef BOOL (WINAPI *InternetReadFile_t)(HINTERNET, LPVOID, DWORD, LPDWORD);
 
@@ -37,6 +36,8 @@ CreateFileW_t pOriginalCreateFileW = NULL;
 WriteFile_t pOriginalWriteFile = NULL;
 DeviceIoControl_t pOriginalDeviceIoControl = NULL;
 NtWriteFile_t pOriginalNtWriteFile = NULL;
+send_t pOriginalSend = NULL;
+recv_t pOriginalRecv = NULL;
 WinHttpSendRequest_t pOriginalWinHttpSendRequest = NULL;
 WinHttpReadData_t pOriginalWinHttpReadData = NULL;
 HttpSendRequestW_t pOriginalHttpSendRequestW = NULL;
@@ -70,7 +71,7 @@ bool IsMonitored(HANDLE h) {
 }
 
 // ==========================================
-// 3. دالة كتابة اللوق (تم تغيير المسار)
+// 3. دالة كتابة اللوق
 // ==========================================
 #define LOG_DIR "C:\\Users\\Public\\tsm_monitor"
 #define LOG_FILE "C:\\Users\\Public\\tsm_monitor\\combined_log.txt"
@@ -101,7 +102,7 @@ void LogData(const char* type, const wchar_t* portName, const char* buffer, DWOR
             WideCharToMultiByte(CP_ACP, 0, portName, -1, portNameA, 256, NULL, NULL);
             fprintf(logFile, "Port: %s\n", portNameA);
         } else {
-            fprintf(logFile, "Port: INTERNET (HTTPS/INet)\n");
+            fprintf(logFile, "Port: INTERNET\n");
         }
         fprintf(logFile, "Type: %s\n", type);
         fprintf(logFile, "Data: ");
@@ -152,8 +153,17 @@ NTSTATUS NTAPI HookedNtWriteFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRouti
 }
 
 // ==========================================
-// 5. هوكات الشبكة (WinHTTP + WinINet)
+// 5. هوكات الشبكة (الكل: Sockets + WinHTTP + WinINet)
 // ==========================================
+int WSAAPI HookedSend(SOCKET s, const char* buf, int len, int flags) {
+    LogData("NET_SOCKET_SEND", L"INTERNET", buf, len);
+    return pOriginalSend(s, buf, len, flags);
+}
+int WSAAPI HookedRecv(SOCKET s, char* buf, int len, int flags) {
+    int result = pOriginalRecv(s, buf, len, flags);
+    if (result > 0) LogData("NET_SOCKET_RECV", L"INTERNET", buf, result);
+    return result;
+}
 BOOL WINAPI HookedWinHttpSendRequest(HINTERNET hRequest, LPCWSTR lpszHeaders, DWORD dwHeadersLength, LPVOID lpOptional, DWORD dwOptionalLength, DWORD dwTotalLength, DWORD_PTR dwContext) {
     if (dwOptionalLength > 0 && lpOptional != NULL) LogData("NET_WINHTTP_SEND", L"INTERNET", (const char*)lpOptional, dwOptionalLength);
     return pOriginalWinHttpSendRequest(hRequest, lpszHeaders, dwHeadersLength, lpOptional, dwOptionalLength, dwTotalLength, dwContext);
@@ -174,34 +184,25 @@ BOOL WINAPI HookedInternetReadFile(HINTERNET hFile, LPVOID lpBuffer, DWORD dwNum
 }
 
 // ==========================================
-// 6. نقطة الدخول للـ DLL
+// 6. نقطة الدخول للـ DLL (مع تقرير حالة MinHook)
 // ==========================================
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
         
-        // --- اختبار التحقق من الحقن ---
-        // سيتم إنشاء هذا الملف فور حقن الـ DLL للتأكد من أنه يعمل
         FILE* testFile; 
         fopen_s(&testFile, "C:\\Users\\Public\\test_inject.txt", "w");
-        if (testFile) { fprintf(testFile, "DLL Injected Successfully!\n"); fclose(testFile); }
-        // ------------------------------
-
-        if (MH_Initialize() == MH_OK) {
-            // هوكات الهاتف
-            MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW);
-            MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile);
-            MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl);
-            MH_CreateHookApi(L"ntdll.dll", "NtWriteFile", &HookedNtWriteFile, (LPVOID*)&pOriginalNtWriteFile);
+        if (testFile) { 
+            fprintf(testFile, "DLL Injected Successfully!\n"); 
             
-            // هوكات الشبكة
-            MH_CreateHookApi(L"winhttp.dll", "WinHttpSendRequest", &HookedWinHttpSendRequest, (LPVOID*)&pOriginalWinHttpSendRequest);
-            MH_CreateHookApi(L"winhttp.dll", "WinHttpReadData", &HookedWinHttpReadData, (LPVOID*)&pOriginalWinHttpReadData);
-            MH_CreateHookApi(L"wininet.dll", "HttpSendRequestW", &HookedHttpSendRequestW, (LPVOID*)&pOriginalHttpSendRequestW);
-            MH_CreateHookApi(L"wininet.dll", "InternetReadFile", &HookedInternetReadFile, (LPVOID*)&pOriginalInternetReadFile);
+            MH_STATUS initStatus = MH_Initialize();
+            fprintf(testFile, "MH_Initialize Status: %d (0 means OK)\n", initStatus);
             
-            MH_EnableHook(MH_ALL_HOOKS);
-        }
-    }
-    return TRUE;
-}
+            if (initStatus == MH_OK) {
+                // تسجيل حالة كل هوك لنعرف أيهم يفشل
+                fprintf(testFile, "Hooking ws2_32.send: %d\n", MH_CreateHookApi(L"ws2_32.dll", "send", &HookedSend, (LPVOID*)&pOriginalSend));
+                fprintf(testFile, "Hooking ws2_32.recv: %d\n", MH_CreateHookApi(L"ws2_32.dll", "recv", &HookedRecv, (LPVOID*)&pOriginalRecv));
+                fprintf(testFile, "Hooking winhttp.Send: %d\n", MH_CreateHookApi(L"winhttp.dll", "WinHttpSendRequest", &HookedWinHttpSendRequest, (LPVOID*)&pOriginalWinHttpSendRequest));
+                fprintf(testFile, "Hooking winhttp.Read: %d\n", MH_CreateHookApi(L"winhttp.dll", "WinHttpReadData", &HookedWinHttpReadData, (LPVOID*)&pOriginalWinHttpReadData));
+                fprintf(testFile, "Hooking wininet.Send: %d\n", MH_CreateHookApi(L"wininet.dll", "HttpSendRequestW", &HookedHttpSendRequestW, (LPVOID*)&pOriginalHttpSendRequestW));
+                fprintf(testFile, "Hooking wininet.Read: %
