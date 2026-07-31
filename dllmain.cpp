@@ -12,7 +12,7 @@
 #pragma comment(lib, "ws2_32.lib")
 
 // ==========================================
-// 1. تضمين جميع دوال winmm.dll الأصلية (للخداع وعدم تعطل الأداة)
+// 1. تضمين جميع دوال winmm.dll الأصلية
 // ==========================================
 #pragma comment(linker, "/export:CloseDriver=C:\\Windows\\System32\\winmm.CloseDriver")
 #pragma comment(linker, "/export:DefDriverProc=C:\\Windows\\System32\\winmm.DefDriverProc")
@@ -168,20 +168,15 @@
 // ==========================================
 // 2. تعريفات الأنواع
 // ==========================================
-typedef LONG NTSTATUS;
-typedef struct _IO_STATUS_BLOCK { union { LONG Status; PVOID Pointer; }; ULONG_PTR Information; } IO_STATUS_BLOCK, *PIO_STATUS_BLOCK;
-
 typedef HANDLE (WINAPI *CreateFileW_t)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 typedef HANDLE (WINAPI *CreateFileA_t)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 typedef BOOL (WINAPI *WriteFile_t)(HANDLE, LPCVOID, DWORD, LPDWORD, LPOVERLAPPED);
 typedef BOOL (WINAPI *DeviceIoControl_t)(HANDLE, DWORD, LPVOID, DWORD, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
-typedef NTSTATUS (NTAPI *NtWriteFile_t)(HANDLE, HANDLE, PVOID, PVOID, PIO_STATUS_BLOCK, PVOID, ULONG, PLARGE_INTEGER, PULONG);
 
 CreateFileW_t pOriginalCreateFileW = NULL;
 CreateFileA_t pOriginalCreateFileA = NULL;
 WriteFile_t pOriginalWriteFile = NULL;
 DeviceIoControl_t pOriginalDeviceIoControl = NULL;
-NtWriteFile_t pOriginalNtWriteFile = NULL;
 
 // ==========================================
 // 3. إدارة مقابض الهاتف
@@ -211,14 +206,15 @@ bool IsMonitored(HANDLE h) {
 }
 
 // ==========================================
-// 4. دالة كتابة اللوق
+// 4. دالة كتابة اللوق المعدلة
 // ==========================================
 #define LOG_DIR "C:\\all_port_usb_mobile_monitor"
 #define LOG_FILE "C:\\all_port_usb_mobile_monitor\\combined_log.txt"
 
-void LogData(const char* type, const wchar_t* portName, const char* buffer, DWORD bufferSize) {
+void LogData(const wchar_t* portName, const char* buffer, DWORD bufferSize) {
     if (bufferSize == 0 || buffer == NULL) return;
     
+    // تصفية البيانات العشوائية
     if (portName != NULL && (wcsstr(portName, L"COM") || wcsstr(portName, L"USB") || wcsstr(portName, L"usb"))) {
         int printableCount = 0;
         for (DWORD i = 0; i < bufferSize; i++) { if (isprint(buffer[i]) || isspace(buffer[i])) printableCount++; }
@@ -235,7 +231,7 @@ void LogData(const char* type, const wchar_t* portName, const char* buffer, DWOR
         localtime_s(&tstruct, &now);
         strftime(buf, sizeof(buf), "%Y-%m-%d %X", &tstruct);
         
-        fprintf(logFile, "\n********************************\n");
+        fprintf(logFile, "************************************\n");
         fprintf(logFile, "Time: %s\n", buf);
         if (portName != NULL) {
             char portNameA[256];
@@ -244,8 +240,7 @@ void LogData(const char* type, const wchar_t* portName, const char* buffer, DWOR
         } else {
             fprintf(logFile, "Port: UNKNOWN\n");
         }
-        fprintf(logFile, "Type: %s\n", type);
-        fprintf(logFile, "Data: ");
+        fprintf(logFile, "Data:\n"); // Data now starts on a new line
         for (DWORD i = 0; i < bufferSize; i++) {
             if (isprint(buffer[i]) || buffer[i] == '\n' || buffer[i] == '\r' || buffer[i] == '\t') fprintf(logFile, "%c", buffer[i]);
             else fprintf(logFile, "\\x%02X", (BYTE)buffer[i]);
@@ -256,7 +251,7 @@ void LogData(const char* type, const wchar_t* portName, const char* buffer, DWOR
 }
 
 // ==========================================
-// 5. هوكات الهاتف (مع CreateFileA لالتقاط COM11)
+// 5. هوكات الهاتف (تم إزالة NtWriteFile)
 // ==========================================
 HANDLE WINAPI HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
     HANDLE hFile = pOriginalCreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
@@ -279,28 +274,21 @@ HANDLE WINAPI HookedCreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD 
 BOOL WINAPI HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped) {
     if (IsMonitored(hFile)) {
         wchar_t portName[256];
-        if (GetPortName(hFile, portName)) LogData("PHONE_WRITE", portName, (const char*)lpBuffer, nNumberOfBytesToWrite);
+        if (GetPortName(hFile, portName)) LogData(portName, (const char*)lpBuffer, nNumberOfBytesToWrite);
     }
     return pOriginalWriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
 }
 BOOL WINAPI HookedDeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode, LPVOID lpInBuffer, DWORD nInBufferSize, LPVOID lpOutBuffer, DWORD nOutBufferSize, LPDWORD lpBytesReturned, LPOVERLAPPED lpOverlapped) {
     if (IsMonitored(hDevice) && lpInBuffer != NULL && nInBufferSize > 0) {
         wchar_t portName[256];
-        if (GetPortName(hDevice, portName)) LogData("PHONE_USB_SEND", portName, (const char*)lpInBuffer, nInBufferSize);
+        if (GetPortName(hDevice, portName)) LogData(portName, (const char*)lpInBuffer, nInBufferSize);
     }
     BOOL result = pOriginalDeviceIoControl(hDevice, dwIoControlCode, lpInBuffer, nInBufferSize, lpOutBuffer, nOutBufferSize, lpBytesReturned, lpOverlapped);
     if (IsMonitored(hDevice) && lpOutBuffer != NULL && lpBytesReturned != NULL && *lpBytesReturned > 0) {
         wchar_t portName[256];
-        if (GetPortName(hDevice, portName)) LogData("PHONE_USB_RESPONSE", portName, (const char*)lpOutBuffer, *lpBytesReturned);
+        if (GetPortName(hDevice, portName)) LogData(portName, (const char*)lpOutBuffer, *lpBytesReturned);
     }
     return result;
-}
-NTSTATUS NTAPI HookedNtWriteFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset, PULONG Key) {
-    if (IsMonitored(FileHandle) && Buffer != NULL && Length > 0) {
-        wchar_t portName[256];
-        if (GetPortName(FileHandle, portName)) LogData("PHONE_NT_WRITE", portName, (const char*)Buffer, Length);
-    }
-    return pOriginalNtWriteFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, Buffer, Length, ByteOffset, Key);
 }
 
 // ==========================================
@@ -310,12 +298,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
         if (MH_Initialize() == MH_OK) {
-            // تم إضافة CreateFileA لالتقاط COM11
+            // تم إزالة NtWriteFile لمنع التكرار
             MH_CreateHookApi(L"kernel32.dll", "CreateFileA", &HookedCreateFileA, (LPVOID*)&pOriginalCreateFileA);
             MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW);
             MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile);
             MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl);
-            MH_CreateHookApi(L"ntdll.dll", "NtWriteFile", &HookedNtWriteFile, (LPVOID*)&pOriginalNtWriteFile);
             MH_EnableHook(MH_ALL_HOOKS);
         }
     }
