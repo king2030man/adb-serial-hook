@@ -171,18 +171,24 @@
 typedef HANDLE (WINAPI *CreateFileW_t)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 typedef HANDLE (WINAPI *CreateFileA_t)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 typedef BOOL (WINAPI *WriteFile_t)(HANDLE, LPCVOID, DWORD, LPDWORD, LPOVERLAPPED);
+typedef BOOL (WINAPI *CloseHandle_t)(HANDLE);
 typedef BOOL (WINAPI *DeviceIoControl_t)(HANDLE, DWORD, LPVOID, DWORD, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
 
 CreateFileW_t pOriginalCreateFileW = NULL;
 CreateFileA_t pOriginalCreateFileA = NULL;
 WriteFile_t pOriginalWriteFile = NULL;
+CloseHandle_t pOriginalCloseHandle = NULL;
 DeviceIoControl_t pOriginalDeviceIoControl = NULL;
 
 // ==========================================
 // 3. إدارة مقابض الهاتف
 // ==========================================
 #define MAX_HANDLES 200
-struct HandleInfo { HANDLE h; wchar_t portName[256]; };
+struct HandleInfo { 
+    HANDLE h; 
+    wchar_t portName[256];
+    bool headerWritten; 
+};
 HandleInfo monitoredHandles[MAX_HANDLES] = {0};
 
 void AddHandle(HANDLE h, LPCWSTR name) {
@@ -190,31 +196,61 @@ void AddHandle(HANDLE h, LPCWSTR name) {
     for(int i=0; i<MAX_HANDLES; i++) {
         if(monitoredHandles[i].h == NULL) {
             monitoredHandles[i].h = h;
+            monitoredHandles[i].headerWritten = false;
             if (name) wcscpy_s(monitoredHandles[i].portName, name);
             else wcscpy_s(monitoredHandles[i].portName, L"Unknown");
             return;
         }
     }
 }
+
 bool GetPortName(HANDLE h, wchar_t* outName) {
-    for(int i=0; i<MAX_HANDLES; i++) { if(monitoredHandles[i].h == h) { wcscpy_s(outName, 256, monitoredHandles[i].portName); return true; } }
+    for(int i=0; i<MAX_HANDLES; i++) { 
+        if(monitoredHandles[i].h == h) { 
+            wcscpy_s(outName, 256, monitoredHandles[i].portName); 
+            return true; 
+        } 
+    }
     return false;
 }
+
 bool IsMonitored(HANDLE h) {
     for(int i=0; i<MAX_HANDLES; i++) { if(monitoredHandles[i].h == h) return true; }
     return false;
 }
 
+// دالة للتحقق إذا كان أول أمر يُكتب (لكتابة الترويسة)
+bool IsFirstWrite(HANDLE h) {
+    for(int i=0; i<MAX_HANDLES; i++) { 
+        if(monitoredHandles[i].h == h) { 
+            if (monitoredHandles[i].headerWritten) return false;
+            monitoredHandles[i].headerWritten = true;
+            return true;
+        } 
+    }
+    return false;
+}
+
+// دالة لإزالة المقبض عند إغلاقه (لكتابة النهاية)
+void RemoveHandle(HANDLE h) {
+    for(int i=0; i<MAX_HANDLES; i++) {
+        if(monitoredHandles[i].h == h) {
+            monitoredHandles[i].h = NULL;
+            monitoredHandles[i].headerWritten = false;
+            return;
+        }
+    }
+}
+
 // ==========================================
-// 4. دالة كتابة اللوق المعدلة
+// 4. دالة كتابة اللوق
 // ==========================================
 #define LOG_DIR "C:\\all_port_usb_mobile_monitor"
 #define LOG_FILE "C:\\all_port_usb_mobile_monitor\\combined_log.txt"
 
-void LogData(const wchar_t* portName, const char* buffer, DWORD bufferSize) {
+void LogData(HANDLE h, const wchar_t* portName, const char* buffer, DWORD bufferSize) {
     if (bufferSize == 0 || buffer == NULL) return;
     
-    // تصفية البيانات العشوائية
     if (portName != NULL && (wcsstr(portName, L"COM") || wcsstr(portName, L"USB") || wcsstr(portName, L"usb"))) {
         int printableCount = 0;
         for (DWORD i = 0; i < bufferSize; i++) { if (isprint(buffer[i]) || isspace(buffer[i])) printableCount++; }
@@ -225,22 +261,27 @@ void LogData(const wchar_t* portName, const char* buffer, DWORD bufferSize) {
     FILE* logFile;
     fopen_s(&logFile, LOG_FILE, "a+");
     if (logFile) {
-        time_t now = time(0);
-        tm tstruct;
-        char buf[80];
-        localtime_s(&tstruct, &now);
-        strftime(buf, sizeof(buf), "%Y-%m-%d %X", &tstruct);
-        
-        fprintf(logFile, "************************************\n");
-        fprintf(logFile, "Time: %s\n", buf);
-        if (portName != NULL) {
-            char portNameA[256];
-            WideCharToMultiByte(CP_ACP, 0, portName, -1, portNameA, 256, NULL, NULL);
-            fprintf(logFile, "Port: %s\n", portNameA);
-        } else {
-            fprintf(logFile, "Port: UNKNOWN\n");
+        // إذا كان أول أمر يرسل، نكتب الترويسة
+        if (IsFirstWrite(h)) {
+            time_t now = time(0);
+            tm tstruct;
+            char buf[80];
+            localtime_s(&tstruct, &now);
+            strftime(buf, sizeof(buf), "%Y-%m-%d %X", &tstruct);
+            
+            fprintf(logFile, "************************************\n");
+            fprintf(logFile, "Time: %s\n", buf);
+            if (portName != NULL) {
+                char portNameA[256];
+                WideCharToMultiByte(CP_ACP, 0, portName, -1, portNameA, 256, NULL, NULL);
+                fprintf(logFile, "Port: %s\n", portNameA);
+            } else {
+                fprintf(logFile, "Port: UNKNOWN\n");
+            }
+            fprintf(logFile, "Data:\n");
         }
-        fprintf(logFile, "Data:\n"); // Data now starts on a new line
+        
+        // كتابة الأمر الفعلي
         for (DWORD i = 0; i < bufferSize; i++) {
             if (isprint(buffer[i]) || buffer[i] == '\n' || buffer[i] == '\r' || buffer[i] == '\t') fprintf(logFile, "%c", buffer[i]);
             else fprintf(logFile, "\\x%02X", (BYTE)buffer[i]);
@@ -251,7 +292,7 @@ void LogData(const wchar_t* portName, const char* buffer, DWORD bufferSize) {
 }
 
 // ==========================================
-// 5. هوكات الهاتف (تم إزالة NtWriteFile)
+// 5. هوكات الهاتف
 // ==========================================
 HANDLE WINAPI HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
     HANDLE hFile = pOriginalCreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
@@ -271,22 +312,39 @@ HANDLE WINAPI HookedCreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD 
     }
     return hFile;
 }
+
 BOOL WINAPI HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped) {
     if (IsMonitored(hFile)) {
         wchar_t portName[256];
-        if (GetPortName(hFile, portName)) LogData(portName, (const char*)lpBuffer, nNumberOfBytesToWrite);
+        if (GetPortName(hFile, portName)) LogData(hFile, portName, (const char*)lpBuffer, nNumberOfBytesToWrite);
     }
     return pOriginalWriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
 }
+
+// عند إغلاق المنفذ، نكتب النهاية
+BOOL WINAPI HookedCloseHandle(HANDLE hObject) {
+    if (IsMonitored(hObject)) {
+        CreateDirectoryA(LOG_DIR, NULL);
+        FILE* logFile;
+        fopen_s(&logFile, LOG_FILE, "a+");
+        if (logFile) {
+            fprintf(logFile, "****************************************\n");
+            fclose(logFile);
+        }
+        RemoveHandle(hObject);
+    }
+    return pOriginalCloseHandle(hObject);
+}
+
 BOOL WINAPI HookedDeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode, LPVOID lpInBuffer, DWORD nInBufferSize, LPVOID lpOutBuffer, DWORD nOutBufferSize, LPDWORD lpBytesReturned, LPOVERLAPPED lpOverlapped) {
     if (IsMonitored(hDevice) && lpInBuffer != NULL && nInBufferSize > 0) {
         wchar_t portName[256];
-        if (GetPortName(hDevice, portName)) LogData(portName, (const char*)lpInBuffer, nInBufferSize);
+        if (GetPortName(hDevice, portName)) LogData(hDevice, portName, (const char*)lpInBuffer, nInBufferSize);
     }
     BOOL result = pOriginalDeviceIoControl(hDevice, dwIoControlCode, lpInBuffer, nInBufferSize, lpOutBuffer, nOutBufferSize, lpBytesReturned, lpOverlapped);
     if (IsMonitored(hDevice) && lpOutBuffer != NULL && lpBytesReturned != NULL && *lpBytesReturned > 0) {
         wchar_t portName[256];
-        if (GetPortName(hDevice, portName)) LogData(portName, (const char*)lpOutBuffer, *lpBytesReturned);
+        if (GetPortName(hDevice, portName)) LogData(hDevice, portName, (const char*)lpOutBuffer, *lpBytesReturned);
     }
     return result;
 }
@@ -298,10 +356,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
         if (MH_Initialize() == MH_OK) {
-            // تم إزالة NtWriteFile لمنع التكرار
             MH_CreateHookApi(L"kernel32.dll", "CreateFileA", &HookedCreateFileA, (LPVOID*)&pOriginalCreateFileA);
             MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW);
             MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile);
+            MH_CreateHookApi(L"kernel32.dll", "CloseHandle", &HookedCloseHandle, (LPVOID*)&pOriginalCloseHandle);
             MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl);
             MH_EnableHook(MH_ALL_HOOKS);
         }
