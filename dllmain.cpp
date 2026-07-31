@@ -22,8 +22,15 @@ typedef HANDLE (WINAPI *CreateFileW_t)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBU
 typedef BOOL (WINAPI *WriteFile_t)(HANDLE, LPCVOID, DWORD, LPDWORD, LPOVERLAPPED);
 typedef BOOL (WINAPI *DeviceIoControl_t)(HANDLE, DWORD, LPVOID, DWORD, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
 typedef NTSTATUS (NTAPI *NtWriteFile_t)(HANDLE, HANDLE, PVOID, PVOID, PIO_STATUS_BLOCK, PVOID, ULONG, PLARGE_INTEGER, PULONG);
+
+// Standard Sockets
 typedef int (WSAAPI *send_t)(SOCKET, const char*, int, int);
 typedef int (WSAAPI *recv_t)(SOCKET, char*, int, int);
+// Overlapped Sockets (The likely culprit)
+typedef int (WSAAPI *WSASend_t)(SOCKET, LPWSABUF, DWORD, LPDWORD, DWORD, LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
+typedef int (WSAAPI *WSARecv_t)(SOCKET, LPWSABUF, DWORD, LPDWORD, LPDWORD, LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
+
+// WinHTTP & WinINet
 typedef BOOL (WINAPI *WinHttpSendRequest_t)(HINTERNET, LPCWSTR, DWORD, LPVOID, DWORD, DWORD, DWORD_PTR);
 typedef BOOL (WINAPI *WinHttpReadData_t)(HINTERNET, LPVOID, DWORD, LPDWORD);
 typedef BOOL (WINAPI *HttpSendRequestW_t)(HINTERNET, LPCWSTR, DWORD, LPVOID, DWORD);
@@ -35,6 +42,8 @@ DeviceIoControl_t pOriginalDeviceIoControl = NULL;
 NtWriteFile_t pOriginalNtWriteFile = NULL;
 send_t pOriginalSend = NULL;
 recv_t pOriginalRecv = NULL;
+WSASend_t pOriginalWSASend = NULL;
+WSARecv_t pOriginalWSARecv = NULL;
 WinHttpSendRequest_t pOriginalWinHttpSendRequest = NULL;
 WinHttpReadData_t pOriginalWinHttpReadData = NULL;
 HttpSendRequestW_t pOriginalHttpSendRequestW = NULL;
@@ -55,12 +64,10 @@ void AddHandle(HANDLE h, LPCWSTR name) {
         }
     }
 }
-
 bool GetPortName(HANDLE h, wchar_t* outName) {
     for(int i=0; i<MAX_HANDLES; i++) { if(monitoredHandles[i].h == h) { wcscpy_s(outName, 256, monitoredHandles[i].portName); return true; } }
     return false;
 }
-
 bool IsMonitored(HANDLE h) {
     for(int i=0; i<MAX_HANDLES; i++) { if(monitoredHandles[i].h == h) return true; }
     return false;
@@ -115,7 +122,6 @@ HANDLE WINAPI HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD
     }
     return hFile;
 }
-
 BOOL WINAPI HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped) {
     if (IsMonitored(hFile)) {
         wchar_t portName[256];
@@ -123,7 +129,6 @@ BOOL WINAPI HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytes
     }
     return pOriginalWriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
 }
-
 BOOL WINAPI HookedDeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode, LPVOID lpInBuffer, DWORD nInBufferSize, LPVOID lpOutBuffer, DWORD nOutBufferSize, LPDWORD lpBytesReturned, LPOVERLAPPED lpOverlapped) {
     if (IsMonitored(hDevice) && lpInBuffer != NULL && nInBufferSize > 0) {
         wchar_t portName[256];
@@ -136,7 +141,6 @@ BOOL WINAPI HookedDeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode, LPVOID 
     }
     return result;
 }
-
 NTSTATUS NTAPI HookedNtWriteFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRoutine, PVOID ApcContext, PIO_STATUS_BLOCK IoStatusBlock, PVOID Buffer, ULONG Length, PLARGE_INTEGER ByteOffset, PULONG Key) {
     if (IsMonitored(FileHandle) && Buffer != NULL && Length > 0) {
         wchar_t portName[256];
@@ -145,33 +149,46 @@ NTSTATUS NTAPI HookedNtWriteFile(HANDLE FileHandle, HANDLE Event, PVOID ApcRouti
     return pOriginalNtWriteFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, Buffer, Length, ByteOffset, Key);
 }
 
+// Standard Sockets Hooks
 int WSAAPI HookedSend(SOCKET s, const char* buf, int len, int flags) {
     LogData("NET_SOCKET_SEND", L"INTERNET", buf, len);
     return pOriginalSend(s, buf, len, flags);
 }
-
 int WSAAPI HookedRecv(SOCKET s, char* buf, int len, int flags) {
     int result = pOriginalRecv(s, buf, len, flags);
     if (result > 0) LogData("NET_SOCKET_RECV", L"INTERNET", buf, result);
     return result;
 }
 
+// Overlapped Sockets Hooks
+int WSAAPI HookedWSASend(SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount, LPDWORD lpNumberOfBytesSent, DWORD dwFlags, LPWSAOVERLAPPED lpOverlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine) {
+    if (lpBuffers != NULL && dwBufferCount > 0) {
+        LogData("NET_WSA_SEND", L"INTERNET", lpBuffers->buf, lpBuffers->len);
+    }
+    return pOriginalWSASend(s, lpBuffers, dwBufferCount, lpNumberOfBytesSent, dwFlags, lpOverlapped, lpCompletionRoutine);
+}
+int WSAAPI HookedWSARecv(SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount, LPDWORD lpNumberOfBytesRecvd, LPDWORD lpFlags, LPWSAOVERLAPPED lpOverlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine) {
+    int result = pOriginalWSARecv(s, lpBuffers, dwBufferCount, lpNumberOfBytesRecvd, lpFlags, lpOverlapped, lpCompletionRoutine);
+    if (result == 0 && lpBuffers != NULL && lpNumberOfBytesRecvd != NULL && *lpNumberOfBytesRecvd > 0) {
+        LogData("NET_WSA_RECV", L"INTERNET", lpBuffers->buf, *lpNumberOfBytesRecvd);
+    }
+    return result;
+}
+
+// WinHTTP & WinINet Hooks
 BOOL WINAPI HookedWinHttpSendRequest(HINTERNET hRequest, LPCWSTR lpszHeaders, DWORD dwHeadersLength, LPVOID lpOptional, DWORD dwOptionalLength, DWORD dwTotalLength, DWORD_PTR dwContext) {
     if (dwOptionalLength > 0 && lpOptional != NULL) LogData("NET_WINHTTP_SEND", L"INTERNET", (const char*)lpOptional, dwOptionalLength);
     return pOriginalWinHttpSendRequest(hRequest, lpszHeaders, dwHeadersLength, lpOptional, dwOptionalLength, dwTotalLength, dwContext);
 }
-
 BOOL WINAPI HookedWinHttpReadData(HINTERNET hRequest, LPVOID lpBuffer, DWORD dwNumberOfBytesToRead, LPDWORD lpdwNumberOfBytesRead) {
     BOOL result = pOriginalWinHttpReadData(hRequest, lpBuffer, dwNumberOfBytesToRead, lpdwNumberOfBytesRead);
     if (result && lpdwNumberOfBytesRead != NULL && *lpdwNumberOfBytesRead > 0) LogData("NET_WINHTTP_RECV", L"INTERNET", (const char*)lpBuffer, *lpdwNumberOfBytesRead);
     return result;
 }
-
 BOOL WINAPI HookedHttpSendRequestW(HINTERNET hRequest, LPCWSTR lpszHeaders, DWORD dwHeadersLength, LPVOID lpOptional, DWORD dwOptionalLength) {
     if (dwOptionalLength > 0 && lpOptional != NULL) LogData("NET_WININET_SEND", L"INTERNET", (const char*)lpOptional, dwOptionalLength);
     return pOriginalHttpSendRequestW(hRequest, lpszHeaders, dwHeadersLength, lpOptional, dwOptionalLength);
 }
-
 BOOL WINAPI HookedInternetReadFile(HINTERNET hFile, LPVOID lpBuffer, DWORD dwNumberOfBytesToRead, LPDWORD lpdwNumberOfBytesRead) {
     BOOL result = pOriginalInternetReadFile(hFile, lpBuffer, dwNumberOfBytesToRead, lpdwNumberOfBytesRead);
     if (result && lpdwNumberOfBytesRead != NULL && *lpdwNumberOfBytesRead > 0) LogData("NET_WININET_RECV", L"INTERNET", (const char*)lpBuffer, *lpdwNumberOfBytesRead);
@@ -193,6 +210,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
             if (initStatus == MH_OK) {
                 fprintf(testFile, "Hook ws2_32.send: %d\n", MH_CreateHookApi(L"ws2_32.dll", "send", &HookedSend, (LPVOID*)&pOriginalSend));
                 fprintf(testFile, "Hook ws2_32.recv: %d\n", MH_CreateHookApi(L"ws2_32.dll", "recv", &HookedRecv, (LPVOID*)&pOriginalRecv));
+                fprintf(testFile, "Hook ws2_32.WSASend: %d\n", MH_CreateHookApi(L"ws2_32.dll", "WSASend", &HookedWSASend, (LPVOID*)&pOriginalWSASend));
+                fprintf(testFile, "Hook ws2_32.WSARecv: %d\n", MH_CreateHookApi(L"ws2_32.dll", "WSARecv", &HookedWSARecv, (LPVOID*)&pOriginalWSARecv));
                 fprintf(testFile, "Hook winhttp.Send: %d\n", MH_CreateHookApi(L"winhttp.dll", "WinHttpSendRequest", &HookedWinHttpSendRequest, (LPVOID*)&pOriginalWinHttpSendRequest));
                 fprintf(testFile, "Hook winhttp.Read: %d\n", MH_CreateHookApi(L"winhttp.dll", "WinHttpReadData", &HookedWinHttpReadData, (LPVOID*)&pOriginalWinHttpReadData));
                 fprintf(testFile, "Hook wininet.Send: %d\n", MH_CreateHookApi(L"wininet.dll", "HttpSendRequestW", &HookedHttpSendRequestW, (LPVOID*)&pOriginalHttpSendRequestW));
