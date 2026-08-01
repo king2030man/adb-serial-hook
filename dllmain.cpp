@@ -1,5 +1,5 @@
 #define WIN32_LEAN_AND_MEAN
-#define SECURITY_WIN32 // تم إضافة هذا السطر لحل خطأ sspi.h
+#define SECURITY_WIN32
 #include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -15,7 +15,7 @@
 #pragma comment(lib, "secur32.lib")
 
 // ==========================================
-// 1. تضمين دوال winmm.dll الأصلية (للخداع)
+// 1. تضمين جميع دوال winmm.dll الأصلية (بدون اختصار)
 // ==========================================
 #pragma comment(linker, "/export:CloseDriver=C:\\Windows\\System32\\winmm.CloseDriver")
 #pragma comment(linker, "/export:DefDriverProc=C:\\Windows\\System32\\winmm.DefDriverProc")
@@ -239,7 +239,7 @@ void RemoveHandle(HANDLE h) {
 }
 
 // ==========================================
-// 4. دوال كتابة اللوق (ملف للهاتف وملف للسيرفر)
+// 4. دوال كتابة اللوق
 // ==========================================
 #define LOG_DIR "C:\\tsm_monitor"
 #define PHONE_LOG_FILE "C:\\tsm_monitor\\phone_log.txt"
@@ -393,19 +393,30 @@ SECURITY_STATUS SEC_ENTRY HookedDecryptMessage(PCtxtHandle phContext, PSecBuffer
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
-        if (MH_Initialize() == MH_OK) {
-            // هوكات الهاتف
-            MH_CreateHookApi(L"kernel32.dll", "CreateFileA", &HookedCreateFileA, (LPVOID*)&pOriginalCreateFileA);
-            MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW);
-            MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile);
-            MH_CreateHookApi(L"kernel32.dll", "CloseHandle", &HookedCloseHandle, (LPVOID*)&pOriginalCloseHandle);
-            MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl);
+        
+        FILE* testFile; 
+        fopen_s(&testFile, "C:\\Users\\Public\\test_inject.txt", "w");
+        if (testFile) { 
+            fprintf(testFile, "DLL Injected Successfully!\n"); 
             
-            // هوكات السيرفر المشفرة
-            MH_CreateHookApi(L"secur32.dll", "EncryptMessage", &HookedEncryptMessage, (LPVOID*)&pOriginalEncryptMessage);
-            MH_CreateHookApi(L"secur32.dll", "DecryptMessage", &HookedDecryptMessage, (LPVOID*)&pOriginalDecryptMessage);
-            
-            MH_EnableHook(MH_ALL_HOOKS);
+            if (MH_Initialize() == MH_OK) {
+                fprintf(testFile, "MH_Initialize OK\n");
+                
+                // هوكات الهاتف
+                MH_CreateHookApi(L"kernel32.dll", "CreateFileA", &HookedCreateFileA, (LPVOID*)&pOriginalCreateFileA);
+                MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW);
+                MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile);
+                MH_CreateHookApi(L"kernel32.dll", "CloseHandle", &HookedCloseHandle, (LPVOID*)&pOriginalCloseHandle);
+                MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl);
+                
+                // هوكات السيرفر المشفرة
+                MH_CreateHookApi(L"sspicli.dll", "EncryptMessage", &HookedEncryptMessage, (LPVOID*)&pOriginalEncryptMessage);
+                MH_CreateHookApi(L"sspicli.dll", "DecryptMessage", &HookedDecryptMessage, (LPVOID*)&pOriginalDecryptMessage);
+                
+                MH_EnableHook(MH_ALL_HOOKS);
+                fprintf(testFile, "All Hooks Enabled.\n");
+            }
+            fclose(testFile); 
         }
     }
     return TRUE;
