@@ -1,4 +1,5 @@
 #define WIN32_LEAN_AND_MEAN
+#define SECURITY_WIN32 // تم إضافة هذا السطر لحل خطأ sspi.h
 #include <windows.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>
