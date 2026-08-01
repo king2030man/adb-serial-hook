@@ -191,7 +191,11 @@ DecryptMessage_t pOriginalDecryptMessage = NULL;
 // 3. إدارة مقابض الهاتف
 // ==========================================
 #define MAX_HANDLES 200
-struct HandleInfo { HANDLE h; wchar_t portName[256]; bool headerWritten; };
+struct HandleInfo { 
+    HANDLE h; 
+    wchar_t portName[256];
+    bool headerWritten; 
+};
 HandleInfo monitoredHandles[MAX_HANDLES] = {0};
 
 void AddHandle(HANDLE h, LPCWSTR name) {
@@ -206,9 +210,251 @@ void AddHandle(HANDLE h, LPCWSTR name) {
         }
     }
 }
+
 bool GetPortName(HANDLE h, wchar_t* outName) {
-    for(int i=0; i<MAX_HANDLES; i++) { if(monitoredHandles[i].h == h) { wcscpy_s(outName, 256, monitoredHandles[i].portName); return true; } }
+    for(int i=0; i<MAX_HANDLES; i++) { 
+        if(monitoredHandles[i].h == h) { 
+            wcscpy_s(outName, 256, monitoredHandles[i].portName); 
+            return true; 
+        } 
+    }
     return false;
 }
+
 bool IsMonitored(HANDLE h) {
+    for(int i=0; i<MAX_HANDLES; i++) { 
+        if(monitoredHandles[i].h == h) return true; 
+    }
+    return false;
+}
+
+bool IsFirstWrite(HANDLE h) {
+    for(int i=0; i<MAX_HANDLES; i++) { 
+        if(monitoredHandles[i].h == h) { 
+            if (monitoredHandles[i].headerWritten) return false;
+            monitoredHandles[i].headerWritten = true;
+            return true;
+        } 
+    }
+    return false;
+}
+
+void RemoveHandle(HANDLE h) {
     for(int i=0; i<MAX_HANDLES; i++) {
+        if(monitoredHandles[i].h == h) {
+            monitoredHandles[i].h = NULL;
+            monitoredHandles[i].headerWritten = false;
+            return;
+        }
+    }
+}
+
+// ==========================================
+// 4. دوال كتابة اللوق
+// ==========================================
+#define LOG_DIR "C:\\Users\\Public\\tsm_monitor"
+#define PHONE_LOG_FILE "C:\\Users\\Public\\tsm_monitor\\phone_log.txt"
+#define SSL_LOG_FILE "C:\\Users\\Public\\tsm_monitor\\ssl_log.txt"
+
+void LogPhoneData(HANDLE h, const wchar_t* portName, const char* buffer, DWORD bufferSize) {
+    if (bufferSize == 0 || buffer == NULL) return;
+    
+    if (portName != NULL && (wcsstr(portName, L"COM") || wcsstr(portName, L"USB") || wcsstr(portName, L"usb"))) {
+        int printableCount = 0;
+        for (DWORD i = 0; i < bufferSize; i++) { if (isprint(buffer[i]) || isspace(buffer[i])) printableCount++; }
+        if (bufferSize > 10 && (printableCount * 100 / bufferSize) < 20) return;
+    }
+    
+    CreateDirectoryA(LOG_DIR, NULL);
+    FILE* logFile;
+    fopen_s(&logFile, PHONE_LOG_FILE, "a+");
+    if (logFile) {
+        if (IsFirstWrite(h)) {
+            time_t now = time(0);
+            tm tstruct;
+            char buf[80];
+            localtime_s(&tstruct, &now);
+            strftime(buf, sizeof(buf), "%Y-%m-%d %X", &tstruct);
+            
+            fprintf(logFile, "************************************\n");
+            fprintf(logFile, "Time: %s\n", buf);
+            if (portName != NULL) {
+                char portNameA[256];
+                WideCharToMultiByte(CP_ACP, 0, portName, -1, portNameA, 256, NULL, NULL);
+                fprintf(logFile, "Port: %s\n", portNameA);
+            } else { 
+                fprintf(logFile, "Port: UNKNOWN\n"); 
+            }
+            fprintf(logFile, "Data:\n");
+        }
+        
+        for (DWORD i = 0; i < bufferSize; i++) {
+            if (isprint(buffer[i]) || buffer[i] == '\n' || buffer[i] == '\r' || buffer[i] == '\t') {
+                fprintf(logFile, "%c", buffer[i]);
+            } else {
+                fprintf(logFile, "\\x%02X", (BYTE)buffer[i]);
+            }
+        }
+        fprintf(logFile, "\n");
+        fclose(logFile);
+    }
+}
+
+void LogSSLData(const char* type, const char* buffer, DWORD bufferSize) {
+    if (bufferSize == 0 || buffer == NULL) return;
+    
+    CreateDirectoryA(LOG_DIR, NULL);
+    FILE* logFile;
+    fopen_s(&logFile, SSL_LOG_FILE, "a+");
+    if (logFile) {
+        time_t now = time(0);
+        tm tstruct;
+        char buf[80];
+        localtime_s(&tstruct, &now);
+        strftime(buf, sizeof(buf), "%Y-%m-%d %X", &tstruct);
+        
+        fprintf(logFile, "************************************\n");
+        fprintf(logFile, "Time: %s\n", buf);
+        fprintf(logFile, "Type: %s\n", type);
+        fprintf(logFile, "Data:\n");
+        
+        for (DWORD i = 0; i < bufferSize; i++) {
+            if (isprint(buffer[i]) || buffer[i] == '\n' || buffer[i] == '\r' || buffer[i] == '\t') {
+                fprintf(logFile, "%c", buffer[i]);
+            } else {
+                fprintf(logFile, "\\x%02X", (BYTE)buffer[i]);
+            }
+        }
+        fprintf(logFile, "\n");
+        fclose(logFile);
+    }
+}
+
+// ==========================================
+// 5. هوكات الهاتف (COM/USB)
+// ==========================================
+HANDLE WINAPI HookedCreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
+    HANDLE hFile = pOriginalCreateFileW(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+    if (lpFileName) {
+        if ((wcsstr(lpFileName, L"COM") || wcsstr(lpFileName, L"usb#")) && !wcsstr(lpFileName, L"C:\\")) {
+            AddHandle(hFile, lpFileName);
+        }
+    }
+    return hFile;
+}
+
+HANDLE WINAPI HookedCreateFileA(LPCSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile) {
+    HANDLE hFile = pOriginalCreateFileA(lpFileName, dwDesiredAccess, dwShareMode, lpSecurityAttributes, dwCreationDisposition, dwFlagsAndAttributes, hTemplateFile);
+    if (lpFileName) {
+        if ((strstr(lpFileName, "COM") || strstr(lpFileName, "usb#")) && !strstr(lpFileName, "C:\\")) {
+            wchar_t wPath[256];
+            MultiByteToWideChar(CP_ACP, 0, lpFileName, -1, wPath, 256);
+            AddHandle(hFile, wPath);
+        }
+    }
+    return hFile;
+}
+
+BOOL WINAPI HookedWriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped) {
+    if (IsMonitored(hFile)) {
+        wchar_t portName[256];
+        if (GetPortName(hFile, portName)) {
+            LogPhoneData(hFile, portName, (const char*)lpBuffer, nNumberOfBytesToWrite);
+        }
+    }
+    return pOriginalWriteFile(hFile, lpBuffer, nNumberOfBytesToWrite, lpNumberOfBytesWritten, lpOverlapped);
+}
+
+BOOL WINAPI HookedCloseHandle(HANDLE hObject) {
+    if (IsMonitored(hObject)) {
+        CreateDirectoryA(LOG_DIR, NULL);
+        FILE* logFile;
+        fopen_s(&logFile, PHONE_LOG_FILE, "a+");
+        if (logFile) { 
+            fprintf(logFile, "****************************************\n"); 
+            fclose(logFile); 
+        }
+        RemoveHandle(hObject);
+    }
+    return pOriginalCloseHandle(hObject);
+}
+
+BOOL WINAPI HookedDeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode, LPVOID lpInBuffer, DWORD nInBufferSize, LPVOID lpOutBuffer, DWORD nOutBufferSize, LPDWORD lpBytesReturned, LPOVERLAPPED lpOverlapped) {
+    if (IsMonitored(hDevice) && lpInBuffer != NULL && nInBufferSize > 0) {
+        wchar_t portName[256];
+        if (GetPortName(hDevice, portName)) {
+            LogPhoneData(hDevice, portName, (const char*)lpInBuffer, nInBufferSize);
+        }
+    }
+    BOOL result = pOriginalDeviceIoControl(hDevice, dwIoControlCode, lpInBuffer, nInBufferSize, lpOutBuffer, nOutBufferSize, lpBytesReturned, lpOverlapped);
+    if (IsMonitored(hDevice) && lpOutBuffer != NULL && lpBytesReturned != NULL && *lpBytesReturned > 0) {
+        wchar_t portName[256];
+        if (GetPortName(hDevice, portName)) {
+            LogPhoneData(hDevice, portName, (const char*)lpOutBuffer, *lpBytesReturned);
+        }
+    }
+    return result;
+}
+
+// ==========================================
+// 6. هوكات السيرفر (فك تشفير HTTPS)
+// ==========================================
+SECURITY_STATUS SEC_ENTRY HookedEncryptMessage(PCtxtHandle phContext, ULONG fQOP, PSecBufferDesc pMessage, ULONG MessageSeqNo) {
+    if (pMessage != NULL) {
+        for (unsigned long i = 0; i < pMessage->cBuffers; i++) {
+            if (pMessage->pBuffers[i].BufferType == SECBUFFER_DATA) {
+                LogSSLData("SEND (Tool -> Server)", (const char*)pMessage->pBuffers[i].pvBuffer, pMessage->pBuffers[i].cbBuffer);
+                break;
+            }
+        }
+    }
+    return pOriginalEncryptMessage(phContext, fQOP, pMessage, MessageSeqNo);
+}
+
+SECURITY_STATUS SEC_ENTRY HookedDecryptMessage(PCtxtHandle phContext, PSecBufferDesc pMessage, ULONG MessageSeqNo, PULONG pfQOP) {
+    SECURITY_STATUS status = pOriginalDecryptMessage(phContext, pMessage, MessageSeqNo, pfQOP);
+    if (status == SEC_E_OK && pMessage != NULL) {
+        for (unsigned long i = 0; i < pMessage->cBuffers; i++) {
+            if (pMessage->pBuffers[i].BufferType == SECBUFFER_DATA) {
+                LogSSLData("RECEIVE (Server -> Tool)", (const char*)pMessage->pBuffers[i].pvBuffer, pMessage->pBuffers[i].cbBuffer);
+                break;
+            }
+        }
+    }
+    return status;
+}
+
+// ==========================================
+// 7. نقطة الدخول للـ DLL
+// ==========================================
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
+    if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
+        DisableThreadLibraryCalls(hModule);
+        
+        FILE* testFile; 
+        fopen_s(&testFile, "C:\\Users\\Public\\test_inject.txt", "w");
+        if (testFile) { 
+            fprintf(testFile, "DLL Injected Successfully!\n"); 
+            
+            if (MH_Initialize() == MH_OK) {
+                // هوكات الهاتف
+                MH_CreateHookApi(L"kernel32.dll", "CreateFileA", &HookedCreateFileA, (LPVOID*)&pOriginalCreateFileA);
+                MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW);
+                MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile);
+                MH_CreateHookApi(L"kernel32.dll", "CloseHandle", &HookedCloseHandle, (LPVOID*)&pOriginalCloseHandle);
+                MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl);
+                
+                // هوكات السيرفر المشفرة (secur32.dll لان الأداة 32-bit)
+                MH_CreateHookApi(L"secur32.dll", "EncryptMessage", &HookedEncryptMessage, (LPVOID*)&pOriginalEncryptMessage);
+                MH_CreateHookApi(L"secur32.dll", "DecryptMessage", &HookedDecryptMessage, (LPVOID*)&pOriginalDecryptMessage);
+                
+                MH_EnableHook(MH_ALL_HOOKS);
+                fprintf(testFile, "All Hooks Enabled Successfully.\n");
+            } else {
+                fprintf(testFile, "MH_Initialize Failed!\n");
+            }
+            fclose(testFile); 
+        }
+    }
+    return TRUE;
+}
