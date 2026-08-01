@@ -15,7 +15,7 @@
 #pragma comment(lib, "secur32.lib")
 
 // ==========================================
-// 1. تضمين جميع دوال winmm.dll الأصلية (بدون اختصار)
+// 1. تضمين جميع دوال winmm.dll الأصلية
 // ==========================================
 #pragma comment(linker, "/export:CloseDriver=C:\\Windows\\System32\\winmm.CloseDriver")
 #pragma comment(linker, "/export:DefDriverProc=C:\\Windows\\System32\\winmm.DefDriverProc")
@@ -239,11 +239,11 @@ void RemoveHandle(HANDLE h) {
 }
 
 // ==========================================
-// 4. دوال كتابة اللوق
+// 4. دوال كتابة اللوق (مسار جديد)
 // ==========================================
-#define LOG_DIR "C:\\tsm_monitor"
-#define PHONE_LOG_FILE "C:\\tsm_monitor\\phone_log.txt"
-#define SSL_LOG_FILE "C:\\tsm_monitor\\ssl_log.txt"
+#define LOG_DIR "C:\\Users\\Public\\tsm_monitor"
+#define PHONE_LOG_FILE "C:\\Users\\Public\\tsm_monitor\\phone_log.txt"
+#define SSL_LOG_FILE "C:\\Users\\Public\\tsm_monitor\\ssl_log.txt"
 
 void LogPhoneData(HANDLE h, const wchar_t* portName, const char* buffer, DWORD bufferSize) {
     if (bufferSize == 0 || buffer == NULL) return;
@@ -388,7 +388,7 @@ SECURITY_STATUS SEC_ENTRY HookedDecryptMessage(PCtxtHandle phContext, PSecBuffer
 }
 
 // ==========================================
-// 7. نقطة الدخول للـ DLL
+// 7. نقطة الدخول للـ DLL (تقرير حالة مفصل)
 // ==========================================
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
@@ -399,22 +399,21 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
         if (testFile) { 
             fprintf(testFile, "DLL Injected Successfully!\n"); 
             
-            if (MH_Initialize() == MH_OK) {
-                fprintf(testFile, "MH_Initialize OK\n");
+            MH_STATUS initStatus = MH_Initialize();
+            fprintf(testFile, "MH_Initialize Status: %d\n", initStatus);
+            
+            if (initStatus == MH_OK) {
+                // تسجيل حالة كل هوك لنعرف أيهم يفشل
+                fprintf(testFile, "Hook kernel32.CreateFileA: %d\n", MH_CreateHookApi(L"kernel32.dll", "CreateFileA", &HookedCreateFileA, (LPVOID*)&pOriginalCreateFileA));
+                fprintf(testFile, "Hook kernel32.CreateFileW: %d\n", MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW));
+                fprintf(testFile, "Hook kernel32.WriteFile: %d\n", MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile));
+                fprintf(testFile, "Hook kernel32.CloseHandle: %d\n", MH_CreateHookApi(L"kernel32.dll", "CloseHandle", &HookedCloseHandle, (LPVOID*)&pOriginalCloseHandle));
+                fprintf(testFile, "Hook kernel32.DeviceIoControl: %d\n", MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl));
                 
-                // هوكات الهاتف
-                MH_CreateHookApi(L"kernel32.dll", "CreateFileA", &HookedCreateFileA, (LPVOID*)&pOriginalCreateFileA);
-                MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW);
-                MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile);
-                MH_CreateHookApi(L"kernel32.dll", "CloseHandle", &HookedCloseHandle, (LPVOID*)&pOriginalCloseHandle);
-                MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl);
+                fprintf(testFile, "Hook sspicli.EncryptMessage: %d\n", MH_CreateHookApi(L"sspicli.dll", "EncryptMessage", &HookedEncryptMessage, (LPVOID*)&pOriginalEncryptMessage));
+                fprintf(testFile, "Hook sspicli.DecryptMessage: %d\n", MH_CreateHookApi(L"sspicli.dll", "DecryptMessage", &HookedDecryptMessage, (LPVOID*)&pOriginalDecryptMessage));
                 
-                // هوكات السيرفر المشفرة
-                MH_CreateHookApi(L"sspicli.dll", "EncryptMessage", &HookedEncryptMessage, (LPVOID*)&pOriginalEncryptMessage);
-                MH_CreateHookApi(L"sspicli.dll", "DecryptMessage", &HookedDecryptMessage, (LPVOID*)&pOriginalDecryptMessage);
-                
-                MH_EnableHook(MH_ALL_HOOKS);
-                fprintf(testFile, "All Hooks Enabled.\n");
+                fprintf(testFile, "MH_EnableHook Status: %d\n", MH_EnableHook(MH_ALL_HOOKS));
             }
             fclose(testFile); 
         }
