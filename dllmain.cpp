@@ -248,9 +248,14 @@ void RemoveHandle(HANDLE h) {
 // ==========================================
 // 4. دوال كتابة اللوق
 // ==========================================
+// ==========================================
+// 4. دوال كتابة اللوق (مع حماية المزامنة)
+// ==========================================
 #define LOG_DIR "C:\\Users\\Public\\tsm_monitor"
 #define PHONE_LOG_FILE "C:\\Users\\Public\\tsm_monitor\\phone_log.txt"
 #define SSL_LOG_FILE "C:\\Users\\Public\\tsm_monitor\\ssl_log.txt"
+
+CRITICAL_SECTION logCS; // متغير المزامنة
 
 void LogPhoneData(HANDLE h, const wchar_t* portName, const char* buffer, DWORD bufferSize) {
     if (bufferSize == 0 || buffer == NULL) return;
@@ -259,6 +264,8 @@ void LogPhoneData(HANDLE h, const wchar_t* portName, const char* buffer, DWORD b
         for (DWORD i = 0; i < bufferSize; i++) { if (isprint(buffer[i]) || isspace(buffer[i])) printableCount++; }
         if (bufferSize > 10 && (printableCount * 100 / bufferSize) < 20) return;
     }
+    
+    EnterCriticalSection(&logCS); // قفل الملف لمنع التداخل
     CreateDirectoryA(LOG_DIR, NULL);
     FILE* logFile;
     fopen_s(&logFile, PHONE_LOG_FILE, "a+");
@@ -281,10 +288,13 @@ void LogPhoneData(HANDLE h, const wchar_t* portName, const char* buffer, DWORD b
         }
         fprintf(logFile, "\n"); fclose(logFile);
     }
+    LeaveCriticalSection(&logCS); // فتح القفل
 }
 
 void LogSSLData(const char* type, const char* buffer, DWORD bufferSize) {
     if (bufferSize == 0 || buffer == NULL) return;
+    
+    EnterCriticalSection(&logCS); // قفل الملف
     CreateDirectoryA(LOG_DIR, NULL);
     FILE* logFile;
     fopen_s(&logFile, SSL_LOG_FILE, "a+");
@@ -299,6 +309,7 @@ void LogSSLData(const char* type, const char* buffer, DWORD bufferSize) {
         }
         fprintf(logFile, "\n"); fclose(logFile);
     }
+    LeaveCriticalSection(&logCS); // فتح القفل
 }
 
 // ==========================================
@@ -356,7 +367,8 @@ BOOL WINAPI HookedDeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode, LPVOID 
 // 6. هوكات السيرفر (فك تشفير BCrypt)
 // ==========================================
 NTSTATUS NTAPI HookedBCryptEncrypt(BCRYPT_KEY_HANDLE hKey, PUCHAR pbInput, DWORD cbInput, VOID *pPaddingInfo, PUCHAR pbIV, DWORD cbIV, PUCHAR pbOutput, DWORD cbOutput, DWORD *pcbResult, ULONG dwFlags) {
-    if (pbInput != NULL && cbInput > 0) {
+    // نسجل البيانات فقط إذا كانت أكبر من 500 بايت (لتسجيل بيانات الدخول فقط وتجنب تعليق الشبكة)
+    if (pbInput != NULL && cbInput > 500) {
         LogSSLData("SEND (Plain Text before Encrypt)", (const char*)pbInput, cbInput);
     }
     return pOriginalBCryptEncrypt(hKey, pbInput, cbInput, pPaddingInfo, pbIV, cbIV, pbOutput, cbOutput, pcbResult, dwFlags);
@@ -364,18 +376,19 @@ NTSTATUS NTAPI HookedBCryptEncrypt(BCRYPT_KEY_HANDLE hKey, PUCHAR pbInput, DWORD
 
 NTSTATUS NTAPI HookedBCryptDecrypt(BCRYPT_KEY_HANDLE hKey, PUCHAR pbInput, DWORD cbInput, VOID *pPaddingInfo, PUCHAR pbIV, DWORD cbIV, PUCHAR pbOutput, DWORD cbOutput, DWORD *pcbResult, ULONG dwFlags) {
     NTSTATUS status = pOriginalBCryptDecrypt(hKey, pbInput, cbInput, pPaddingInfo, pbIV, cbIV, pbOutput, cbOutput, pcbResult, dwFlags);
-    if (status == 0 && pbOutput != NULL && pcbResult != NULL && *pcbResult > 0) {
+    // نسجل البيانات فقط إذا كانت أكبر من 500 بايت
+    if (status == 0 && pbOutput != NULL && pcbResult != NULL && *pcbResult > 500) {
         LogSSLData("RECEIVE (Plain Text after Decrypt)", (const char*)pbOutput, *pcbResult);
     }
     return status;
 }
-
 // ==========================================
 // 7. نقطة الدخول
 // ==========================================
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
+           InitializeCriticalSection(&logCS); 
         
         FILE* testFile; 
         fopen_s(&testFile, "C:\\Users\\Public\\test_inject.txt", "w");
