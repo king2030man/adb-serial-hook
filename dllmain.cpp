@@ -264,9 +264,9 @@ static void InitRuntimePaths() {
     }
 
     char* slash = strrchr(modulePath, '\');
-    if (slash) *slash = ' ';
+    if (slash) *slash = ' ';
 
-    if (modulePath[0] == ' ')
+    if (modulePath[0] == ' ')
         strcpy_s(modulePath, ".");
 
     sprintf_s(g_LogDir, "%s", modulePath);
