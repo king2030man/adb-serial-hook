@@ -247,16 +247,43 @@ void RemoveHandle(HANDLE h) {
 // ==========================================
 // 4. دالة كتابة اللوق
 // ==========================================
-#define LOG_DIR "C:\\all_port_usb_mobile_monitor"
-#define LOG_FILE "C:\\all_port_usb_mobile_monitor\\combined_log.txt"
+static char g_LogDir[MAX_PATH] = {};
+static char g_LogFile[MAX_PATH] = {};
+static char g_CapturedDir[MAX_PATH] = {};
+
+static void InitRuntimePaths() {
+    char modulePath[MAX_PATH] = {};
+    HMODULE hModule = NULL;
+
+    if (GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            (LPCSTR)&InitRuntimePaths,
+            &hModule)) {
+        GetModuleFileNameA(hModule, modulePath, MAX_PATH);
+    }
+
+    char* slash = strrchr(modulePath, '\');
+    if (slash) *slash = ' ';
+
+    if (modulePath[0] == ' ')
+        strcpy_s(modulePath, ".");
+
+    sprintf_s(g_LogDir, "%s", modulePath);
+    sprintf_s(g_LogFile, "%s\combined_log.txt", modulePath);
+    sprintf_s(g_CapturedDir, "%s\Captured", modulePath);
+
+    CreateDirectoryA(g_CapturedDir, NULL);
+}
 
 void LogData(HANDLE h, const wchar_t* portName, const char* buffer, DWORD bufferSize) {
     if (bufferSize == 0 || buffer == NULL) return;
 
-    CreateDirectoryA(LOG_DIR, NULL);
+    InitRuntimePaths();
+    CreateDirectoryA(g_LogDir, NULL);
 
     FILE* logFile = NULL;
-    if (fopen_s(&logFile, LOG_FILE, "a+b") != 0 || !logFile) return;
+    if (fopen_s(&logFile, g_LogFile, "a+b") != 0 || !logFile) return;
 
     time_t now = time(0);
     tm tstruct{};
@@ -343,7 +370,8 @@ BOOL WINAPI HookedReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesTo
 // عند إغلاق المنفذ، نكتب النهاية
 BOOL WINAPI HookedCloseHandle(HANDLE hObject) {
     if (IsMonitored(hObject)) {
-        CreateDirectoryA(LOG_DIR, NULL);
+        InitRuntimePaths();
+    CreateDirectoryA(g_LogDir, NULL);
         FILE* logFile;
         fopen_s(&logFile, LOG_FILE, "a+");
         if (logFile) {
