@@ -141,7 +141,6 @@
 #pragma comment(linker, "/export:waveInStart=C:\\Windows\\System32\\winmm.waveInStart")
 #pragma comment(linker, "/export:waveInStop=C:\\Windows\\System32\\winmm.waveInStop")
 #pragma comment(linker, "/export:waveInUnprepareHeader=C:\\Windows\\System32\\winmm.waveInUnprepareHeader")
-#pragma comment(linker, "/export:waveOutBreakLoop=C:\\Windows\\System32\\winmm.waveOutBreakLoop")
 #pragma comment(linker, "/export:waveOutClose=C:\\Windows\\System32\\winmm.waveOutClose")
 #pragma comment(linker, "/export:waveOutGetDevCapsA=C:\\Windows\\System32\\winmm.waveOutGetDevCapsA")
 #pragma comment(linker, "/export:waveOutGetDevCapsW=C:\\Windows\\System32\\winmm.waveOutGetDevCapsW")
@@ -152,7 +151,6 @@
 #pragma comment(linker, "/export:waveOutGetPitch=C:\\Windows\\System32\\winmm.waveOutGetPitch")
 #pragma comment(linker, "/export:waveOutGetPlaybackRate=C:\\Windows\\System32\\winmm.waveOutGetPlaybackRate")
 #pragma comment(linker, "/export:waveOutGetPosition=C:\\Windows\\System32\\winmm.waveOutGetPosition")
-#pragma comment(linker, "/export:waveOutGetVolume=C:\\Windows\\System32\\winmm.waveOutGetVolume")
 #pragma comment(linker, "/export:waveOutMessage=C:\\Windows\\System32\\winmm.waveOutMessage")
 #pragma comment(linker, "/export:waveOutOpen=C:\\Windows\\System32\\winmm.waveOutOpen")
 #pragma comment(linker, "/export:waveOutPause=C:\\Windows\\System32\\winmm.waveOutPause")
@@ -166,7 +164,7 @@
 #pragma comment(linker, "/export:waveOutWrite=C:\\Windows\\System32\\winmm.waveOutWrite")
 
 // ==========================================
-// 2. تعريفات الأنواع
+// 2. تعريف الهوكات
 // ==========================================
 typedef HANDLE (WINAPI *CreateFileW_t)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 typedef HANDLE (WINAPI *CreateFileA_t)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
@@ -175,6 +173,11 @@ typedef BOOL (WINAPI *ReadFile_t)(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
 typedef BOOL (WINAPI *CloseHandle_t)(HANDLE);
 typedef BOOL (WINAPI *DeviceIoControl_t)(HANDLE, DWORD, LPVOID, DWORD, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
 
+typedef int (WINAPI *WSASend_t)(SOCKET, LPWSABUF, DWORD, LPDWORD, DWORD, LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
+typedef int (WINAPI *WSARecv_t)(SOCKET, LPWSABUF, DWORD, LPDWORD, LPDWORD, LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
+typedef int (WINAPI *send_t)(SOCKET, const char*, int, int);
+typedef int (WINAPI *recv_t)(SOCKET, char*, int, int);
+
 CreateFileW_t pOriginalCreateFileW = NULL;
 CreateFileA_t pOriginalCreateFileA = NULL;
 WriteFile_t pOriginalWriteFile = NULL;
@@ -182,61 +185,56 @@ ReadFile_t pOriginalReadFile = NULL;
 CloseHandle_t pOriginalCloseHandle = NULL;
 DeviceIoControl_t pOriginalDeviceIoControl = NULL;
 
+WSASend_t pOriginalWSASend = NULL;
+WSARecv_t pOriginalWSARecv = NULL;
+send_t pOriginalSend = NULL;
+recv_t pOriginalRecv = NULL;
+
 // ==========================================
-// 3. إدارة مقابض الهاتف
+// 3. إدارة الـ Handles
 // ==========================================
-#define MAX_HANDLES 200
-struct HandleInfo { 
-    HANDLE h; 
+struct MonitoredHandle {
+    HANDLE h;
     wchar_t portName[256];
-    bool headerWritten; 
+    bool headerWritten;
 };
-HandleInfo monitoredHandles[MAX_HANDLES] = {0};
+
+static MonitoredHandle monitoredHandles[128] = {};
+
+bool IsMonitored(HANDLE h) {
+    if (!h || h == INVALID_HANDLE_VALUE) return false;
+    for (int i = 0; i < 128; ++i) {
+        if (monitoredHandles[i].h == h) return true;
+    }
+    return false;
+}
+
+bool GetPortName(HANDLE h, wchar_t* outName) {
+    if (!outName) return false;
+    for (int i = 0; i < 128; ++i) {
+        if (monitoredHandles[i].h == h) {
+            wcsncpy_s(outName, 256, monitoredHandles[i].portName, _TRUNCATE);
+            return true;
+        }
+    }
+    return false;
+}
 
 void AddHandle(HANDLE h, LPCWSTR name) {
-    if (h == NULL || h == INVALID_HANDLE_VALUE) return;
-    for(int i=0; i<MAX_HANDLES; i++) {
-        if(monitoredHandles[i].h == NULL) {
+    if (!h || h == INVALID_HANDLE_VALUE || !name) return;
+    for (int i = 0; i < 128; ++i) {
+        if (monitoredHandles[i].h == NULL) {
             monitoredHandles[i].h = h;
+            wcsncpy_s(monitoredHandles[i].portName, 256, name, _TRUNCATE);
             monitoredHandles[i].headerWritten = false;
-            if (name) wcscpy_s(monitoredHandles[i].portName, name);
-            else wcscpy_s(monitoredHandles[i].portName, L"Unknown");
             return;
         }
     }
 }
 
-bool GetPortName(HANDLE h, wchar_t* outName) {
-    for(int i=0; i<MAX_HANDLES; i++) { 
-        if(monitoredHandles[i].h == h) { 
-            wcscpy_s(outName, 256, monitoredHandles[i].portName); 
-            return true; 
-        } 
-    }
-    return false;
-}
-
-bool IsMonitored(HANDLE h) {
-    for(int i=0; i<MAX_HANDLES; i++) { if(monitoredHandles[i].h == h) return true; }
-    return false;
-}
-
-// دالة للتحقق إذا كان أول أمر يُكتب (لكتابة الترويسة)
-bool IsFirstWrite(HANDLE h) {
-    for(int i=0; i<MAX_HANDLES; i++) { 
-        if(monitoredHandles[i].h == h) { 
-            if (monitoredHandles[i].headerWritten) return false;
-            monitoredHandles[i].headerWritten = true;
-            return true;
-        } 
-    }
-    return false;
-}
-
-// دالة لإزالة المقبض عند إغلاقه (لكتابة النهاية)
 void RemoveHandle(HANDLE h) {
-    for(int i=0; i<MAX_HANDLES; i++) {
-        if(monitoredHandles[i].h == h) {
+    for (int i = 0; i < 128; ++i) {
+        if (monitoredHandles[i].h == h) {
             monitoredHandles[i].h = NULL;
             monitoredHandles[i].headerWritten = false;
             return;
@@ -263,15 +261,16 @@ static void InitRuntimePaths() {
         GetModuleFileNameA(hModule, modulePath, MAX_PATH);
     }
 
-    char* slash = strrchr(modulePath, '\');
-    if (slash) *slash = ' ';
+    char* slash = strrchr(modulePath, '\\');
+    if (slash)
+        *slash = '\0';
 
-    if (modulePath[0] == ' ')
+    if (modulePath[0] == '\0')
         strcpy_s(modulePath, ".");
 
     sprintf_s(g_LogDir, "%s", modulePath);
-    sprintf_s(g_LogFile, "%s\combined_log.txt", modulePath);
-    sprintf_s(g_CapturedDir, "%s\Captured", modulePath);
+    sprintf_s(g_LogFile, "%s\\combined_log.txt", modulePath);
+    sprintf_s(g_CapturedDir, "%s\\Captured", modulePath);
 
     CreateDirectoryA(g_CapturedDir, NULL);
 }
@@ -371,15 +370,17 @@ BOOL WINAPI HookedReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesTo
 BOOL WINAPI HookedCloseHandle(HANDLE hObject) {
     if (IsMonitored(hObject)) {
         InitRuntimePaths();
-    CreateDirectoryA(g_LogDir, NULL);
-        FILE* logFile;
-        fopen_s(&logFile, LOG_FILE, "a+");
-        if (logFile) {
-            fprintf(logFile, "****************************************\n");
+
+        FILE* logFile = NULL;
+        if (fopen_s(&logFile, g_LogFile, "a+") == 0 && logFile) {
+            fprintf(logFile,
+                    "\n**************** HANDLE CLOSED ****************\n");
             fclose(logFile);
         }
+
         RemoveHandle(hObject);
     }
+
     return pOriginalCloseHandle(hObject);
 }
 
@@ -389,7 +390,7 @@ BOOL WINAPI HookedDeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode, LPVOID 
         if (GetPortName(hDevice, portName)) LogData(hDevice, portName, (const char*)lpInBuffer, nInBufferSize);
     }
     BOOL result = pOriginalDeviceIoControl(hDevice, dwIoControlCode, lpInBuffer, nInBufferSize, lpOutBuffer, nOutBufferSize, lpBytesReturned, lpOverlapped);
-    if (IsMonitored(hDevice) && lpOutBuffer != NULL && lpBytesReturned != NULL && *lpBytesReturned > 0) {
+    if (result && IsMonitored(hDevice) && lpOutBuffer != NULL && lpBytesReturned != NULL && *lpBytesReturned > 0) {
         wchar_t portName[256];
         if (GetPortName(hDevice, portName)) LogData(hDevice, portName, (const char*)lpOutBuffer, *lpBytesReturned);
     }
@@ -397,20 +398,84 @@ BOOL WINAPI HookedDeviceIoControl(HANDLE hDevice, DWORD dwIoControlCode, LPVOID 
 }
 
 // ==========================================
-// 6. نقطة الدخول للـ DLL
+// 6. هوكات الشبكة
 // ==========================================
+void LogNetwork(const char* type, const void* data, int len) {
+    if (!data || len <= 0) return;
+    InitRuntimePaths();
+    FILE* f = NULL;
+    if (fopen_s(&f, g_LogFile, "a+") != 0 || !f) return;
+    fprintf(f, "\n[NETWORK %s] %d bytes\nHEX: ", type, len);
+    const unsigned char* p = (const unsigned char*)data;
+    for (int i = 0; i < len; ++i) fprintf(f, "%02X ", p[i]);
+    fprintf(f, "\nASCII: ");
+    for (int i = 0; i < len; ++i) fputc((p[i] >= 32 && p[i] <= 126) ? p[i] : '.', f);
+    fprintf(f, "\n");
+    fclose(f);
+}
+
+int WINAPI HookedSend(SOCKET s, const char* buf, int len, int flags) {
+    if (buf && len > 0) LogNetwork("SEND", buf, len);
+    return pOriginalSend(s, buf, len, flags);
+}
+
+int WINAPI HookedRecv(SOCKET s, char* buf, int len, int flags) {
+    int result = pOriginalRecv(s, buf, len, flags);
+    if (result > 0) LogNetwork("RECV", buf, result);
+    return result;
+}
+
+int WINAPI HookedWSASend(SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount, LPDWORD lpNumberOfBytesSent, DWORD dwFlags, LPWSAOVERLAPPED lpOverlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine) {
+    if (lpBuffers) {
+        for (DWORD i = 0; i < dwBufferCount; ++i)
+            if (lpBuffers[i].buf && lpBuffers[i].len > 0) LogNetwork("WSASEND", lpBuffers[i].buf, (int)lpBuffers[i].len);
+    }
+    return pOriginalWSASend(s, lpBuffers, dwBufferCount, lpNumberOfBytesSent, dwFlags, lpOverlapped, lpCompletionRoutine);
+}
+
+int WINAPI HookedWSARecv(SOCKET s, LPWSABUF lpBuffers, DWORD dwBufferCount, LPDWORD lpNumberOfBytesRecvd, LPDWORD lpFlags, LPWSAOVERLAPPED lpOverlapped, LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine) {
+    int result = pOriginalWSARecv(s, lpBuffers, dwBufferCount, lpNumberOfBytesRecvd, lpFlags, lpOverlapped, lpCompletionRoutine);
+    if (result == 0 && lpBuffers && lpNumberOfBytesRecvd) {
+        DWORD remaining = *lpNumberOfBytesRecvd;
+        for (DWORD i = 0; i < dwBufferCount && remaining > 0; ++i) {
+            DWORD n = (lpBuffers[i].len < remaining) ? lpBuffers[i].len : remaining;
+            if (lpBuffers[i].buf && n > 0) LogNetwork("WSARECV", lpBuffers[i].buf, (int)n);
+            remaining -= n;
+        }
+    }
+    return result;
+}
+
+// ==========================================
+// 7. تفعيل MinHook
+// ==========================================
+void InitHooks() {
+    if (MH_Initialize() != MH_OK) return;
+
+    MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW);
+    MH_CreateHookApi(L"kernel32.dll", "CreateFileA", &HookedCreateFileA, (LPVOID*)&pOriginalCreateFileA);
+    MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile);
+    MH_CreateHookApi(L"kernel32.dll", "ReadFile", &HookedReadFile, (LPVOID*)&pOriginalReadFile);
+    MH_CreateHookApi(L"kernel32.dll", "CloseHandle", &HookedCloseHandle, (LPVOID*)&pOriginalCloseHandle);
+    MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl);
+
+    MH_CreateHookApi(L"ws2_32.dll", "send", &HookedSend, (LPVOID*)&pOriginalSend);
+    MH_CreateHookApi(L"ws2_32.dll", "recv", &HookedRecv, (LPVOID*)&pOriginalRecv);
+    MH_CreateHookApi(L"ws2_32.dll", "WSASend", &HookedWSASend, (LPVOID*)&pOriginalWSASend);
+    MH_CreateHookApi(L"ws2_32.dll", "WSARecv", &HookedWSARecv, (LPVOID*)&pOriginalWSARecv);
+
+    MH_EnableHook(MH_ALL_HOOKS);
+}
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
-        if (MH_Initialize() == MH_OK) {
-            MH_CreateHookApi(L"kernel32.dll", "CreateFileA", &HookedCreateFileA, (LPVOID*)&pOriginalCreateFileA);
-            MH_CreateHookApi(L"kernel32.dll", "CreateFileW", &HookedCreateFileW, (LPVOID*)&pOriginalCreateFileW);
-            MH_CreateHookApi(L"kernel32.dll", "WriteFile", &HookedWriteFile, (LPVOID*)&pOriginalWriteFile);
-            MH_CreateHookApi(L"kernel32.dll", "ReadFile", &HookedReadFile, (LPVOID*)&pOriginalReadFile);
-            MH_CreateHookApi(L"kernel32.dll", "CloseHandle", &HookedCloseHandle, (LPVOID*)&pOriginalCloseHandle);
-            MH_CreateHookApi(L"kernel32.dll", "DeviceIoControl", &HookedDeviceIoControl, (LPVOID*)&pOriginalDeviceIoControl);
-            MH_EnableHook(MH_ALL_HOOKS);
-        }
+        InitRuntimePaths();
+        CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)InitHooks, NULL, 0, NULL);
+    }
+    else if (ul_reason_for_call == DLL_PROCESS_DETACH) {
+        MH_DisableHook(MH_ALL_HOOKS);
+        MH_Uninitialize();
     }
     return TRUE;
 }
